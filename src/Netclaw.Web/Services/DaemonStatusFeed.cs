@@ -25,14 +25,16 @@ public sealed class DaemonStatusFeed : BackgroundService
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(3);
 
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly DaemonTargetStore _targets;
 
-    public DaemonStatusFeed(IServiceScopeFactory scopeFactory, NetclawPaths paths)
+    public DaemonStatusFeed(IServiceScopeFactory scopeFactory, DaemonTargetStore targets)
     {
         _scopeFactory = scopeFactory;
-        Endpoint = DaemonControlPlaneEndpointResolver.ResolveEndpoint(paths);
+        _targets = targets;
     }
 
-    public string Endpoint { get; }
+    // Live so the topbar reflects an operator re-point on the next poll.
+    public string Endpoint => _targets.EffectiveEndpoint;
 
     public DaemonApiResult<DaemonRuntimeStatus.Response>? Current { get; private set; }
 

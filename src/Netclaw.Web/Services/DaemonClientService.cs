@@ -17,12 +17,14 @@ namespace Netclaw.Web.Services;
 /// pages render identical "ok / unreachable / unauthorized" surfaces regardless of
 /// which endpoint they consumed.
 /// </summary>
-public sealed class DaemonClientService(IDaemonApi api, string endpoint)
+public sealed class DaemonClientService(IDaemonApi api, DaemonTargetStore targets)
 {
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan StatusPollTimeout = TimeSpan.FromSeconds(5);
 
-    public string Endpoint { get; } = endpoint;
+    // Read live from the store so result/display surfaces ("unreachable at …") track
+    // an operator re-point without the scoped client being recreated.
+    public string Endpoint => targets.EffectiveEndpoint;
 
     // Health + lifecycle
 

@@ -4,6 +4,7 @@
 @inject DaemonStatusFeed Feed
 @inject DaemonClientService StatusClient
 @inject DaemonProcessLauncher Launcher
+@inject DaemonTargetStore Targets
 
 <div class="nc-page-head">
     <div>
@@ -74,8 +75,8 @@
         <div class="nc-card__body">
             <p style="margin:0; color:var(--nc-fg-muted); font-size:13px; line-height:1.6;">
                 Stop is delivered via authenticated <code class="nc-mono">POST /api/lifecycle/stop</code> on the daemon.
-                Start launches the <code class="nc-mono">netclawd</code> binary located via
-                <code class="nc-mono">NETCLAW_DAEMON_PATH</code> or the directory of <code class="nc-mono">netclaw-web</code>.
+                Start launches the <code class="nc-mono">netclawd</code> binary resolved by the
+                <strong>Daemon target</strong> panel below (override, then the default search).
             </p>
             <hr style="border:0; border-top:1px solid var(--nc-border-sub); margin:14px 0;"/>
             <dl class="nc-kv">
@@ -94,6 +95,78 @@
         </div>
     </section>
 </div>
+
+<section class="nc-card" style="margin-bottom:16px;">
+    <header class="nc-card__head">
+        <h2 class="nc-h2">Daemon target</h2>
+    </header>
+    <div class="nc-card__body">
+        <p style="margin:0 0 14px; color:var(--nc-fg-muted); font-size:13px; line-height:1.6;">
+            Override which <code class="nc-mono">netclawd</code> this UI talks to and launches — point it at a
+            dev build in <code class="nc-mono">bin/Debug</code> or a binary on your <code class="nc-mono">PATH</code>.
+            Leave a field blank to fall back to normal discovery.
+        </p>
+
+        <dl class="nc-kv">
+            <dt>Effective endpoint</dt>
+            <dd class="nc-kv__val--mono">
+                @Targets.EffectiveEndpoint
+                <span class="nc-pill @(Targets.EndpointIsOverridden ? "nc-pill--accent" : "nc-pill--neutral")">@(Targets.EndpointIsOverridden ? "override" : "default")</span>
+            </dd>
+            <dt>Launch binary</dt>
+            <dd class="nc-kv__val--mono">
+                @if (_resolvedBinary is not null)
+                {
+                    @_resolvedBinary
+                    <span class="nc-pill @(Targets.BinaryIsOverridden ? "nc-pill--accent" : "nc-pill--neutral")">@(Targets.BinaryIsOverridden ? "override" : "discovered")</span>
+                }
+                else
+                {
+                    <span style="color:var(--nc-bad);">not found</span>
+                    @if (Targets.BinaryIsOverridden)
+                    {
+                        <span class="nc-pill nc-pill--bad">override unresolved</span>
+                    }
+                }
+            </dd>
+        </dl>
+
+        <hr style="border:0; border-top:1px solid var(--nc-border-sub); margin:14px 0;"/>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+            <label class="nc-field">
+                <span>Endpoint override</span>
+                <input class="nc-input nc-input--mono" type="text"
+                       placeholder="e.g. http://127.0.0.1:5210 (blank = default)"
+                       @bind="_endpointInput" @bind:event="oninput" />
+            </label>
+            <label class="nc-field">
+                <span>Launch binary override</span>
+                <input class="nc-input nc-input--mono" type="text"
+                       placeholder="full path to netclawd, or a name on PATH like ncl"
+                       @bind="_binaryInput" @bind:event="oninput" />
+            </label>
+        </div>
+
+        <p style="margin:8px 0 0; color:var(--nc-fg-muted); font-size:12px; line-height:1.6;">
+            Endpoint changes take effect on the next status poll; the launch override applies the next time you press Start.
+            A real file or a command on <code class="nc-mono">PATH</code> resolves — a shell alias does not.
+            Saved to <code class="nc-mono">@Targets.OverrideFilePath</code>.
+        </p>
+
+        @if (!string.IsNullOrEmpty(_targetMessage))
+        {
+            <div class="nc-banner @(_targetOk ? "nc-banner--good" : "nc-banner--bad")" style="margin-top:12px;">
+                <div><div class="nc-banner__detail">@_targetMessage</div></div>
+            </div>
+        }
+
+        <div style="display:flex; gap:8px; margin-top:12px;">
+            <button class="nc-btn nc-btn--primary" @onclick="SaveTarget">Save target</button>
+            <button class="nc-btn" disabled="@(!Targets.EndpointIsOverridden && !Targets.BinaryIsOverridden)" @onclick="ResetTarget">Reset to default</button>
+        </div>
+    </div>
+</section>
 
 @* Restart / Stop confirm modal. .nc-modal scrim handles outside-click; Esc handled in @onkeydown. *@
 @if (_pending is not null)
@@ -134,10 +207,56 @@
     private string _heroLabel = "Checking…";
     private string _heroPillLabel = "unknown";
 
+    // Daemon target override panel state.
+    private string _endpointInput = string.Empty;
+    private string _binaryInput = string.Empty;
+    private string? _targetMessage;
+    private bool _targetOk;
+    private string? _resolvedBinary;
+
     protected override void OnInitialized()
     {
         ApplyResult(Feed.Current);
         Feed.Updated += OnFeedUpdated;
+        SeedTargetInputs();
+        Targets.Changed += OnTargetsChanged;
+    }
+
+    private void OnTargetsChanged() => InvokeAsync(StateHasChanged);
+
+    private void SeedTargetInputs()
+    {
+        _endpointInput = Targets.Current.Endpoint ?? string.Empty;
+        _binaryInput = Targets.Current.BinaryPath ?? string.Empty;
+        // Resolved here (not in markup) so the PATH/file probe runs on load and on
+        // change, never on every 3s status re-render.
+        _resolvedBinary = Launcher.FindDaemonBinary();
+    }
+
+    private void SaveTarget()
+    {
+        var endpoint = _endpointInput?.Trim() ?? string.Empty;
+        if (!string.IsNullOrEmpty(endpoint)
+            && (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)
+                || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)))
+        {
+            _targetOk = false;
+            _targetMessage = "Endpoint override must be an absolute http or https URL (e.g. http://127.0.0.1:5210), or blank for the default.";
+            return;
+        }
+
+        Targets.Update(new DaemonTargetOverride { Endpoint = endpoint, BinaryPath = _binaryInput });
+        SeedTargetInputs();
+        _targetOk = true;
+        _targetMessage = "Daemon target saved.";
+    }
+
+    private void ResetTarget()
+    {
+        Targets.Reset();
+        SeedTargetInputs();
+        _targetOk = true;
+        _targetMessage = "Reverted to default daemon target.";
     }
 
     private void OnFeedUpdated(DaemonApiResult<DaemonRuntimeStatus.Response> result)
@@ -277,5 +396,6 @@
     public void Dispose()
     {
         Feed.Updated -= OnFeedUpdated;
+        Targets.Changed -= OnTargetsChanged;
     }
 }

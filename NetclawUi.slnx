@@ -6,6 +6,7 @@
     <File Path="global.json" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/NetclawUi.AppHost/NetclawUi.AppHost.csproj" />
     <Project Path="src/Netclaw.Web/Netclaw.Web.csproj" />
     <Project Path="src/Netclaw.Web.Tests/Netclaw.Web.Tests.csproj" />
   </Folder>

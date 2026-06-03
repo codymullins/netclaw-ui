@@ -1,5 +1,6 @@
 @implements IDisposable
 @inject DaemonStatusFeed Feed
+@inject DaemonTargetStore Targets
 
 <header class="nc-topbar">
     <div class="nc-crumb">
@@ -47,11 +48,19 @@
         _endpointLabel = StripScheme(Feed.Endpoint);
         ApplyResult(Feed.Current);
         Feed.Updated += OnFeedUpdated;
+        Targets.Changed += OnTargetsChanged;
     }
 
     private void OnFeedUpdated(DaemonApiResult<DaemonRuntimeStatus.Response> result)
     {
+        _endpointLabel = StripScheme(Feed.Endpoint);
         ApplyResult(result);
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnTargetsChanged()
+    {
+        _endpointLabel = StripScheme(Feed.Endpoint);
         InvokeAsync(StateHasChanged);
     }
 
@@ -101,5 +110,6 @@
     public void Dispose()
     {
         Feed.Updated -= OnFeedUpdated;
+        Targets.Changed -= OnTargetsChanged;
     }
 }

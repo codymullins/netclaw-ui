@@ -6,15 +6,29 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Netclaw.Configuration;
 using Netclaw.Web.Services;
 using Refit;
 using Xunit;
 
 namespace Netclaw.Web.Tests;
 
-public sealed class DaemonClientServiceTests
+public sealed class DaemonClientServiceTests : IDisposable
 {
     private const string Endpoint = "http://127.0.0.1:65535";
+
+    private readonly string _tempHome;
+    private readonly DaemonTargetStore _targets;
+
+    public DaemonClientServiceTests()
+    {
+        // An endpoint override makes EffectiveEndpoint deterministic without
+        // touching env vars or the shared resolver.
+        _tempHome = Path.Combine(Path.GetTempPath(), "netclaw-web-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_tempHome);
+        _targets = new DaemonTargetStore(new NetclawPaths(_tempHome), _tempHome);
+        _targets.Update(new DaemonTargetOverride { Endpoint = Endpoint });
+    }
 
     [Fact]
     public async Task Returns_unreachable_when_daemon_cannot_be_contacted()
@@ -63,11 +77,16 @@ public sealed class DaemonClientServiceTests
         Assert.Equal("0.0.0", result.Value.Build.Version);
     }
 
-    private static DaemonClientService Build(HttpMessageHandler handler)
+    private DaemonClientService Build(HttpMessageHandler handler)
     {
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri(Endpoint) };
         var api = RestService.For<IDaemonApi>(httpClient);
-        return new DaemonClientService(api, Endpoint);
+        return new DaemonClientService(api, _targets);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_tempHome, recursive: true); } catch (IOException) { } // slopwatch-ignore: SW003 temp-dir cleanup is best-effort.
     }
 
     private sealed class ThrowingHandler : HttpMessageHandler

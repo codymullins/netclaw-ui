@@ -1,0 +1,15 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.4.0">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>ca3674c4-37fb-4865-9d05-d2a33c48d2d1</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Netclaw.Web\Netclaw.Web.csproj" />
+  </ItemGroup>
+
+</Project>

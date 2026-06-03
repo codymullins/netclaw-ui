@@ -3,7 +3,6 @@
 //      Copyright (C) 2026 - 2026 Petabridge, LLC <https://petabridge.com>
 // </copyright>
 // -----------------------------------------------------------------------
-using System.Net.Http.Headers;
 using Netclaw.Configuration;
 using Netclaw.Web.Components;
 using Netclaw.Web.Services;
@@ -27,25 +26,23 @@ builder.Services.AddHttpClient();
 builder.Services.AddSingleton<NetclawPaths>(_ => new NetclawPaths());
 builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
 
-// Endpoint + bearer token are resolved once at registration time from the same files the CLI
-// reads, so every Web call uses the same loopback-friendly auth posture.
+// Holds the operator's runtime override for which daemon the UI targets (endpoint +
+// launch binary). Persisted under ~/.netclaw-ui so a chosen dev target survives restarts.
+builder.Services.AddSingleton<DaemonTargetStore>();
+builder.Services.AddTransient<DaemonEndpointHandler>();
+
+// BaseAddress only seeds the request path; DaemonEndpointHandler rewrites scheme/host/port
+// and attaches auth on every send from the live DaemonTargetStore, so a re-point takes
+// effect without restarting the UI.
 builder.Services.AddRefitClient<IDaemonApi>()
     .ConfigureHttpClient((sp, client) =>
-    {
-        var paths = sp.GetRequiredService<NetclawPaths>();
-        var endpoint = DaemonControlPlaneEndpointResolver.ResolveEndpoint(paths);
-        client.BaseAddress = new Uri(endpoint);
-        var token = DaemonControlPlaneEndpointResolver.ResolveBearerToken(endpoint, paths);
-        if (!string.IsNullOrWhiteSpace(token))
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-    });
+        client.BaseAddress = new Uri(sp.GetRequiredService<DaemonTargetStore>().EffectiveEndpoint))
+    .AddHttpMessageHandler<DaemonEndpointHandler>();
 
 builder.Services.AddScoped<DaemonClientService>(sp =>
-{
-    var paths = sp.GetRequiredService<NetclawPaths>();
-    var endpoint = DaemonControlPlaneEndpointResolver.ResolveEndpoint(paths);
-    return new DaemonClientService(sp.GetRequiredService<IDaemonApi>(), endpoint);
-});
+    new DaemonClientService(
+        sp.GetRequiredService<IDaemonApi>(),
+        sp.GetRequiredService<DaemonTargetStore>()));
 builder.Services.AddScoped<DaemonProcessLauncher>();
 builder.Services.AddScoped<NetclawConfigReader>();
 builder.Services.AddScoped<ModelSelectionReader>();

@@ -20,8 +20,13 @@ namespace Netclaw.Web.Services;
 public sealed class DaemonProcessLauncher
 {
     private readonly NetclawPaths _paths;
+    private readonly DaemonTargetStore _targets;
 
-    public DaemonProcessLauncher(NetclawPaths paths) => _paths = paths;
+    public DaemonProcessLauncher(NetclawPaths paths, DaemonTargetStore targets)
+    {
+        _paths = paths;
+        _targets = targets;
+    }
 
     /// <summary>
     /// Probes the daemon lock file. <c>true</c> means a daemon already holds
@@ -46,7 +51,15 @@ public sealed class DaemonProcessLauncher
     }
 
     /// <summary>
-    /// Attempts to locate the <c>netclawd</c> binary. Search order:
+    /// Attempts to locate the <c>netclawd</c> binary.
+    /// <para>
+    /// When the operator has set a launch override (<see cref="DaemonTargetStore"/>),
+    /// that is the <em>only</em> source consulted: an explicit path is used as-is and a
+    /// bare name is resolved on PATH. A set-but-unresolvable override returns <c>null</c>
+    /// rather than silently falling back to the default daemon — re-pointing the UI at a
+    /// dev build must never quietly launch the installed one.
+    /// </para>
+    /// Without an override the default search order applies:
     /// <list type="number">
     /// <item>the <c>NETCLAW_DAEMON_PATH</c> env var (full path to the binary),</item>
     /// <item>the directory of the current process (side-by-side install),</item>
@@ -72,6 +85,18 @@ public sealed class DaemonProcessLauncher
 
     private IEnumerable<string?> EnumerateBinaryCandidates()
     {
+        // Operator launch override is authoritative — no fallback to default discovery.
+        var launchOverride = _targets.Current.BinaryPath;
+        if (!string.IsNullOrWhiteSpace(launchOverride))
+        {
+            if (LooksLikePath(launchOverride))
+                yield return launchOverride;
+            else
+                foreach (var resolved in ResolveOnPath(launchOverride))
+                    yield return resolved;
+            yield break;
+        }
+
         // 1. Explicit override — a full path to the binary.
         yield return Environment.GetEnvironmentVariable("NETCLAW_DAEMON_PATH");
 
@@ -94,11 +119,33 @@ public sealed class DaemonProcessLauncher
         }
 
         // 5. Anywhere on PATH.
+        foreach (var resolved in ResolveOnPath(BinaryName))
+            yield return resolved;
+    }
+
+    /// <summary>True when the value names a location (rooted or containing a separator) rather than a bare command.</summary>
+    private static bool LooksLikePath(string value) =>
+        Path.IsPathRooted(value)
+        || value.Contains(Path.DirectorySeparatorChar)
+        || value.Contains(Path.AltDirectorySeparatorChar);
+
+    /// <summary>
+    /// Yields candidate full paths for a bare command name across every PATH directory.
+    /// On Windows the <c>.exe</c> variant is tried too so an override like <c>ncl</c>
+    /// resolves to <c>ncl.exe</c>.
+    /// </summary>
+    private static IEnumerable<string> ResolveOnPath(string name)
+    {
         var pathVar = Environment.GetEnvironmentVariable("PATH");
-        if (!string.IsNullOrEmpty(pathVar))
+        if (string.IsNullOrEmpty(pathVar))
+            yield break;
+
+        var hasExtension = Path.HasExtension(name);
+        foreach (var dir in pathVar.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            foreach (var dir in pathVar.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                yield return Path.Combine(dir, BinaryName);
+            yield return Path.Combine(dir, name);
+            if (OperatingSystem.IsWindows() && !hasExtension)
+                yield return Path.Combine(dir, name + ".exe");
         }
     }
 
@@ -109,12 +156,17 @@ public sealed class DaemonProcessLauncher
 
         var binary = FindDaemonBinary();
         if (binary is null)
-            return new DaemonLaunchResult(
-                false,
-                $"Cannot find netclawd binary. Looked next to netclaw-web, in the default " +
-                $"install location ({_paths.BinDirectory}), and on PATH. Install netclawd " +
-                "(e.g. via install.sh) or set NETCLAW_DAEMON_PATH to the binary's full path.",
-                null);
+        {
+            var launchOverride = _targets.Current.BinaryPath;
+            var message = !string.IsNullOrWhiteSpace(launchOverride)
+                ? $"Launch override '{launchOverride}' could not be resolved. It must be a full path to an " +
+                  "existing file or a command name on PATH (a shell alias from your profile won't resolve). " +
+                  "Fix it or clear the override on the Daemon control page."
+                : $"Cannot find netclawd binary. Looked next to netclaw-web, in the default " +
+                  $"install location ({_paths.BinDirectory}), and on PATH. Install netclawd " +
+                  "(e.g. via install.sh), set a launch override, or set NETCLAW_DAEMON_PATH to the binary's full path.";
+            return new DaemonLaunchResult(false, message, null);
+        }
 
         _paths.EnsureDirectoriesExist();
 
