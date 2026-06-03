@@ -24,6 +24,20 @@ git submodule update --init --recursive
 
 ## Build and run
 
+The app runs under .NET Aspire. The `aspire run` command starts the AppHost, which brings up the web app and its dependencies together:
+
+```bash
+aspire run
+```
+
+This needs the Aspire CLI. Install it once with:
+
+```bash
+dotnet tool install -g aspire.cli
+```
+
+To build, test, or run the web app on its own:
+
 ```bash
 dotnet build NetclawUi.slnx
 dotnet test NetclawUi.slnx
