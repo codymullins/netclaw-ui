@@ -46,27 +46,60 @@ public sealed class DaemonProcessLauncher
     }
 
     /// <summary>
-    /// Attempts to locate the <c>netclawd</c> binary, preferring the
-    /// <c>NETCLAW_DAEMON_PATH</c> env var, then the directory of the
-    /// current process.
+    /// Attempts to locate the <c>netclawd</c> binary. Search order:
+    /// <list type="number">
+    /// <item>the <c>NETCLAW_DAEMON_PATH</c> env var (full path to the binary),</item>
+    /// <item>the directory of the current process (side-by-side install),</item>
+    /// <item>the default install location — <see cref="NetclawPaths.BinDirectory"/>,
+    ///       which is where <c>install.sh</c> drops <c>netclawd</c> (<c>~/.netclaw/bin</c>),</item>
+    /// <item>the Windows installer default (<c>%LOCALAPPDATA%\Programs\netclaw</c>),</item>
+    /// <item>anywhere on <c>PATH</c>.</item>
+    /// </list>
     /// </summary>
     public string? FindDaemonBinary()
     {
-        var envPath = Environment.GetEnvironmentVariable("NETCLAW_DAEMON_PATH");
-        if (!string.IsNullOrEmpty(envPath) && File.Exists(envPath))
-            return Path.GetFullPath(envPath);
-
-        var webDir = Path.GetDirectoryName(Environment.ProcessPath);
-        if (webDir is not null)
+        foreach (var candidate in EnumerateBinaryCandidates())
         {
-            var candidate = OperatingSystem.IsWindows()
-                ? Path.Combine(webDir, "netclawd.exe")
-                : Path.Combine(webDir, "netclawd");
-            if (File.Exists(candidate))
-                return candidate;
+            if (!string.IsNullOrEmpty(candidate) && File.Exists(candidate))
+                return Path.GetFullPath(candidate);
         }
 
         return null;
+    }
+
+    private static string BinaryName =>
+        OperatingSystem.IsWindows() ? "netclawd.exe" : "netclawd";
+
+    private IEnumerable<string?> EnumerateBinaryCandidates()
+    {
+        // 1. Explicit override — a full path to the binary.
+        yield return Environment.GetEnvironmentVariable("NETCLAW_DAEMON_PATH");
+
+        // 2. Next to netclaw-web (side-by-side install or publish output).
+        var webDir = Path.GetDirectoryName(Environment.ProcessPath);
+        if (webDir is not null)
+            yield return Path.Combine(webDir, BinaryName);
+
+        // 3. Default install location. install.sh installs netclawd into
+        //    ~/.netclaw/bin, which is exactly NetclawPaths.BinDirectory (and
+        //    follows NETCLAW_HOME when set).
+        yield return Path.Combine(_paths.BinDirectory, BinaryName);
+
+        // 4. Windows installer default (%LOCALAPPDATA%\Programs\netclaw).
+        if (OperatingSystem.IsWindows())
+        {
+            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (!string.IsNullOrEmpty(localAppData))
+                yield return Path.Combine(localAppData, "Programs", "netclaw", BinaryName);
+        }
+
+        // 5. Anywhere on PATH.
+        var pathVar = Environment.GetEnvironmentVariable("PATH");
+        if (!string.IsNullOrEmpty(pathVar))
+        {
+            foreach (var dir in pathVar.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                yield return Path.Combine(dir, BinaryName);
+        }
     }
 
     public DaemonLaunchResult Start()
@@ -78,7 +111,9 @@ public sealed class DaemonProcessLauncher
         if (binary is null)
             return new DaemonLaunchResult(
                 false,
-                "Cannot find netclawd binary. Set NETCLAW_DAEMON_PATH or place it next to netclaw-web.",
+                $"Cannot find netclawd binary. Looked next to netclaw-web, in the default " +
+                $"install location ({_paths.BinDirectory}), and on PATH. Install netclawd " +
+                "(e.g. via install.sh) or set NETCLAW_DAEMON_PATH to the binary's full path.",
                 null);
 
         _paths.EnsureDirectoriesExist();
