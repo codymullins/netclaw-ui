@@ -1,0 +1,182 @@
+@implements IDisposable
+@inject DaemonStatusFeed Feed
+@inject NavigationManager Nav
+
+<aside class="nc-sidebar">
+    <div class="nc-brand">
+        <div class="nc-brand__mark">›</div>
+        <div class="nc-brand__name">Netclaw</div>
+        @if (!string.IsNullOrWhiteSpace(_version))
+        {
+            <div class="nc-brand__ver">@_version</div>
+        }
+    </div>
+
+    <nav class="nc-nav-group">
+        <NavLink class="nc-nav-item" ActiveClass="nc-nav-item--active" href="/status" Match="NavLinkMatch.Prefix">
+            <span class="nc-nav-item__icon">
+                <svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="1.5" width="4.5" height="6.5"/><rect x="1.5" y="9.5" width="4.5" height="3"/><rect x="8" y="1.5" width="4.5" height="3"/><rect x="8" y="6" width="4.5" height="6.5"/></svg>
+            </span>
+            <span class="nc-nav-item__label">Status</span>
+        </NavLink>
+        <NavLink class="nc-nav-item" ActiveClass="nc-nav-item--active" href="/sessions" Match="NavLinkMatch.Prefix">
+            <span class="nc-nav-item__icon">
+                <svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1.5 2.5h11v7.5h-6l-3 2V10H1.5z"/><path d="M4 5.5h6M4 7.5h4"/></svg>
+            </span>
+            <span class="nc-nav-item__label">Sessions</span>
+        </NavLink>
+        <NavLink class="nc-nav-item" ActiveClass="nc-nav-item--active" href="/stats" Match="NavLinkMatch.Prefix">
+            <span class="nc-nav-item__icon">
+                <svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="6" width="2.5" height="6.5"/><rect x="5.75" y="3" width="2.5" height="9.5"/><rect x="10" y="1.5" width="2.5" height="11"/></svg>
+            </span>
+            <span class="nc-nav-item__label">Stats</span>
+        </NavLink>
+        <NavLink class="nc-nav-item" ActiveClass="nc-nav-item--active" href="/daemon" Match="NavLinkMatch.Prefix">
+            <span class="nc-nav-item__icon">
+                <svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="2.5"/><path d="M7 1.5v2M7 10.5v2M1.5 7h2M10.5 7h2M3 3l1.4 1.4M9.6 9.6L11 11M3 11l1.4-1.4M9.6 4.4L11 3"/></svg>
+            </span>
+            <span class="nc-nav-item__label">Daemon</span>
+        </NavLink>
+        <NavLink class="nc-nav-item" ActiveClass="nc-nav-item--active" href="/model" Match="NavLinkMatch.Prefix">
+            <span class="nc-nav-item__icon">
+                <svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M7 1.5l4.5 2.5v6L7 12.5 2.5 10V4z"/><path d="M2.5 4L7 6.5l4.5-2.5M7 6.5v6"/></svg>
+            </span>
+            <span class="nc-nav-item__label">Model</span>
+        </NavLink>
+        <NavLink class="nc-nav-item" ActiveClass="nc-nav-item--active" href="/configuration" Match="NavLinkMatch.Prefix">
+            <span class="nc-nav-item__icon">
+                <svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="1.8"/><path d="M7 1v2M7 11v2M1 7h2M11 7h2M2.5 2.5l1.4 1.4M10.1 10.1l1.4 1.4M2.5 11.5l1.4-1.4M10.1 3.9l1.4-1.4"/></svg>
+            </span>
+            <span class="nc-nav-item__label">Configuration</span>
+        </NavLink>
+    </nav>
+
+    <nav class="nc-nav-group">
+        <div class="nc-nav-head">State</div>
+        <NavLink class="nc-nav-item" ActiveClass="nc-nav-item--active" href="/memory" Match="NavLinkMatch.Prefix">
+            <span class="nc-nav-item__label">Memory</span>
+        </NavLink>
+        <NavLink class="nc-nav-item" ActiveClass="nc-nav-item--active" href="/reminders" Match="NavLinkMatch.Prefix">
+            <span class="nc-nav-item__label">Reminders</span>
+        </NavLink>
+        <NavLink class="nc-nav-item" ActiveClass="nc-nav-item--active" href="/approvals" Match="NavLinkMatch.Prefix">
+            <span class="nc-nav-item__icon">
+                <svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M7 1.5 L12 3.5 L12 7 C12 10 9.5 12.5 7 13 C4.5 12.5 2 10 2 7 L2 3.5 Z"/><path d="M4.5 7l2 2 3-3"/></svg>
+            </span>
+            <span class="nc-nav-item__label">Approvals</span>
+        </NavLink>
+    </nav>
+
+    <nav class="nc-nav-group">
+        <div class="nc-nav-head">Connectors</div>
+        <NavLink class="nc-nav-item" ActiveClass="nc-nav-item--active" href="/connectors/discord" Match="NavLinkMatch.Prefix">
+            <span class="@StatusTone.DotClass(ConnectorTone("discord"))"></span>
+            <span class="nc-nav-item__label">Discord</span>
+        </NavLink>
+        <NavLink class="nc-nav-item" ActiveClass="nc-nav-item--active" href="/connectors/slack" Match="NavLinkMatch.Prefix">
+            <span class="@StatusTone.DotClass(ConnectorTone("slack"))"></span>
+            <span class="nc-nav-item__label">Slack</span>
+        </NavLink>
+        <NavLink class="nc-nav-item" ActiveClass="nc-nav-item--active" href="/connectors/mattermost" Match="NavLinkMatch.Prefix">
+            <span class="@StatusTone.DotClass(ConnectorTone("mattermost"))"></span>
+            <span class="nc-nav-item__label">Mattermost</span>
+        </NavLink>
+        <NavLink class="nc-nav-item" ActiveClass="nc-nav-item--active" href="/connectors/webhooks" Match="NavLinkMatch.Prefix">
+            <span class="nc-nav-dot nc-nav-dot--neutral"></span>
+            <span class="nc-nav-item__label">Webhooks</span>
+        </NavLink>
+        <NavLink class="nc-nav-item" ActiveClass="nc-nav-item--active" href="/connectors/mcp" Match="NavLinkMatch.Prefix">
+            <span class="nc-nav-item__icon">
+                <svg viewBox="0 0 14 14" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5.5 1.5h3a1 1 0 0 1 1 1v1.5H4.5V2.5a1 1 0 0 1 1-1z"/><rect x="2" y="4" width="10" height="2.5" rx=".7"/><path d="M3 6.5v5a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5v-5"/><path d="M6 9.5h2"/></svg>
+            </span>
+            <span class="nc-nav-item__label">MCP</span>
+        </NavLink>
+        @* "Add connector" CTA is not wired up this round; render as a muted, non-clickable item. *@
+        <span class="nc-nav-item nc-nav-item--muted" aria-disabled="true">
+            <span class="nc-nav-item__icon">+</span>
+            <span class="nc-nav-item__label">Add connector</span>
+        </span>
+    </nav>
+
+    <footer class="nc-sidebar-foot">
+        <div class="nc-sidebar-foot__row">
+            <span class="@StatusTone.DotClass(_overallTone)"></span>
+            <span>@_overallLabel</span>
+        </div>
+        <div class="nc-sidebar-foot__endpoint">@_endpointLabel</div>
+    </footer>
+</aside>
+
+@code {
+    private string? _version;
+    private StatusToneKind _overallTone = StatusToneKind.Neutral;
+    private string _overallLabel = "Daemon status unknown";
+    private string _endpointLabel = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        _endpointLabel = StripScheme(Feed.Endpoint);
+        ApplyResult(Feed.Current);
+        Feed.Updated += OnFeedUpdated;
+    }
+
+    private void OnFeedUpdated(DaemonApiResult<DaemonRuntimeStatus.Response> result)
+    {
+        ApplyResult(result);
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void ApplyResult(DaemonApiResult<DaemonRuntimeStatus.Response>? result)
+    {
+        if (result is null)
+        {
+            _overallTone = StatusToneKind.Neutral;
+            _overallLabel = "Daemon status unknown";
+            _version = null;
+            return;
+        }
+
+        switch (result.State)
+        {
+            case DaemonApiResultState.Ok when result.Value is { } s:
+                _overallTone = StatusTone.From(s.Overall);
+                _overallLabel = $"Daemon {s.Overall}";
+                _version = s.Build.Version;
+                break;
+            case DaemonApiResultState.Unauthorized:
+                _overallTone = StatusToneKind.Warn;
+                _overallLabel = "Unauthorized";
+                break;
+            default:
+                _overallTone = StatusToneKind.Bad;
+                _overallLabel = "Daemon unreachable";
+                break;
+        }
+    }
+
+    private StatusToneKind ConnectorTone(string key)
+    {
+        if (Feed.Current?.Value is not { } s)
+            return StatusToneKind.Neutral;
+
+        var connector = s.Connectors.FirstOrDefault(c =>
+            string.Equals(c.Key, key, StringComparison.OrdinalIgnoreCase));
+        if (connector is null)
+            return StatusToneKind.Neutral;
+        if (!connector.Enabled)
+            return StatusToneKind.Neutral;
+        return StatusTone.From(connector.Status);
+    }
+
+    private static string StripScheme(string endpoint)
+    {
+        if (string.IsNullOrEmpty(endpoint)) return endpoint;
+        var idx = endpoint.IndexOf("://", StringComparison.Ordinal);
+        return idx < 0 ? endpoint : endpoint[(idx + 3)..].TrimEnd('/');
+    }
+
+    public void Dispose()
+    {
+        Feed.Updated -= OnFeedUpdated;
+    }
+}

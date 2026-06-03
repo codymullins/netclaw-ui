@@ -1,0 +1,8 @@
+@* Legacy redirect → /connectors/discord with the configuration tab preselected. *@
+@page "/discord/configuration"
+@inject NavigationManager Nav
+
+@code {
+    protected override void OnInitialized()
+        => Nav.NavigateTo("/connectors/discord?tab=configuration", replace: true);
+}

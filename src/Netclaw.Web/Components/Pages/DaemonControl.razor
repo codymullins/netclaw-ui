@@ -1,0 +1,281 @@
+@page "/daemon"
+@rendermode RenderMode.InteractiveServer
+@implements IDisposable
+@inject DaemonStatusFeed Feed
+@inject DaemonClientService StatusClient
+@inject DaemonProcessLauncher Launcher
+
+<div class="nc-page-head">
+    <div>
+        <h1 class="nc-h1">Daemon control</h1>
+        <p class="nc-sub">Lifecycle for <code class="nc-mono">netclawd</code></p>
+    </div>
+</div>
+
+@{
+    var tone = _heroTone;
+    var heroToneClass = tone switch
+    {
+        StatusToneKind.Good => "good",
+        StatusToneKind.Warn => "warn",
+        StatusToneKind.Bad => "bad",
+        _ => "neutral",
+    };
+    var dotSoft = $"var(--nc-{heroToneClass}-soft)";
+    var dotColor = $"var(--nc-{heroToneClass})";
+}
+
+<section class="nc-card" style="padding:22px 24px; margin-bottom:16px; display:flex; align-items:center; gap:24px;">
+    <div style="width:56px; height:56px; border-radius:50%; background:@dotSoft; display:flex; align-items:center; justify-content:center;">
+        <div style="width:16px; height:16px; border-radius:8px; background:@dotColor; box-shadow:0 0 0 6px @dotSoft;"></div>
+    </div>
+    <div style="flex:1;">
+        <div style="display:flex; align-items:baseline; gap:12px;">
+            <span style="font-size:24px; font-weight:600; letter-spacing:-0.4px;">@_heroLabel</span>
+            <span class="@StatusTone.PillClass(tone)">@_heroPillLabel</span>
+        </div>
+        <div style="color:var(--nc-fg-muted); font-size:13px; margin-top:4px; display:flex; gap:14px; flex-wrap:wrap;">
+            @if (_status?.Value is { } s)
+            {
+                <span>PID <span class="nc-mono">@s.Process.Pid</span></span>
+                <span>·</span><span>Build <span class="nc-mono">@s.Build.Version</span></span>
+                <span>·</span><span>Uptime <span class="nc-mono">@FormatUptime(s.Process.UptimeSeconds)</span></span>
+            }
+            else if (_status?.State == DaemonApiResultState.Unauthorized)
+            {
+                <span>Daemon is up but this host is not paired.</span>
+            }
+            else if (_status is not null)
+            {
+                <span>@(_status.ErrorDetail ?? "Endpoint did not respond.")</span>
+            }
+        </div>
+    </div>
+    <div style="display:flex; gap:8px; align-items:flex-start;">
+        <button class="nc-btn nc-btn--danger" disabled="@(_busy || !_isRunning)" @onclick="ConfirmStop">Stop</button>
+        <button class="nc-btn" disabled="@(_busy || _isRunning)" @onclick="OnStartAsync">Start</button>
+        <button class="nc-btn nc-btn--primary" disabled="@(_busy || !_isRunning)" @onclick="ConfirmRestart">Restart…</button>
+    </div>
+</section>
+
+@if (!string.IsNullOrEmpty(_actionMessage))
+{
+    <div class="nc-banner @(_actionSuccess ? "nc-banner--warn" : "nc-banner--bad")" style="margin-bottom:16px;">
+        <div>
+            <div class="nc-banner__title">@(_actionSuccess ? "OK" : "Failed")</div>
+            <div class="nc-banner__detail">@_actionMessage</div>
+        </div>
+    </div>
+}
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
+    <section class="nc-card">
+        <header class="nc-card__head"><h2 class="nc-h2">Lifecycle</h2></header>
+        <div class="nc-card__body">
+            <p style="margin:0; color:var(--nc-fg-muted); font-size:13px; line-height:1.6;">
+                Stop is delivered via authenticated <code class="nc-mono">POST /api/lifecycle/stop</code> on the daemon.
+                Start launches the <code class="nc-mono">netclawd</code> binary located via
+                <code class="nc-mono">NETCLAW_DAEMON_PATH</code> or the directory of <code class="nc-mono">netclaw-web</code>.
+            </p>
+            <hr style="border:0; border-top:1px solid var(--nc-border-sub); margin:14px 0;"/>
+            <dl class="nc-kv">
+                <dt>Endpoint</dt> <dd class="nc-kv__val--mono">@StatusClient.Endpoint</dd>
+            </dl>
+        </div>
+    </section>
+
+    <section class="nc-card">
+        <header class="nc-card__head"><h2 class="nc-h2">Restart behavior</h2></header>
+        <div class="nc-card__body">
+            <p style="margin:0; color:var(--nc-fg-muted); font-size:13px; line-height:1.6;">
+                Restart sends Stop, waits up to 15 seconds for the daemon to release its lock
+                file, then launches a fresh instance. Active sessions may be interrupted.
+            </p>
+        </div>
+    </section>
+</div>
+
+@* Restart / Stop confirm modal. .nc-modal scrim handles outside-click; Esc handled in @onkeydown. *@
+@if (_pending is not null)
+{
+    <div class="nc-modal" @onclick="OnScrimClick" @onkeydown="OnModalKeyDown" tabindex="-1">
+        <div class="nc-modal__body" role="dialog" aria-modal="true" aria-labelledby="confirm-title" @onclick:stopPropagation="true">
+            <div class="nc-modal__head">
+                <div class="nc-modal__title">
+                    <span class="nc-modal__icon">!</span>
+                    <span id="confirm-title">@(_pending == PendingAction.Restart ? "Restart daemon?" : "Stop daemon?")</span>
+                </div>
+                <p>
+                    @(_pending == PendingAction.Restart
+                        ? "This will stop the daemon, wait for it to exit, then start a new instance. In-flight sessions may be interrupted."
+                        : "Active sessions will be interrupted. The daemon will need to be started again before this UI is fully functional.")
+                </p>
+            </div>
+            <div class="nc-modal__foot">
+                <button class="nc-btn" disabled="@_busy" @onclick="CancelPending">Cancel</button>
+                <button class="nc-btn nc-btn--primary" disabled="@_busy" @onclick="ExecutePendingAsync">
+                    @(_pending == PendingAction.Restart ? "Stop & restart" : "Stop now")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private enum PendingAction { Stop, Restart }
+
+    private DaemonApiResult<DaemonRuntimeStatus.Response>? _status;
+    private bool _isRunning;
+    private bool _busy;
+    private string? _actionMessage;
+    private bool _actionSuccess;
+    private PendingAction? _pending;
+    private StatusToneKind _heroTone = StatusToneKind.Neutral;
+    private string _heroLabel = "Checking…";
+    private string _heroPillLabel = "unknown";
+
+    protected override void OnInitialized()
+    {
+        ApplyResult(Feed.Current);
+        Feed.Updated += OnFeedUpdated;
+    }
+
+    private void OnFeedUpdated(DaemonApiResult<DaemonRuntimeStatus.Response> result)
+    {
+        ApplyResult(result);
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void ApplyResult(DaemonApiResult<DaemonRuntimeStatus.Response>? result)
+    {
+        _status = result;
+        _isRunning = result is { State: DaemonApiResultState.Ok or DaemonApiResultState.Unauthorized };
+
+        if (result is null)
+        {
+            _heroTone = StatusToneKind.Neutral;
+            _heroLabel = "Checking…";
+            _heroPillLabel = "unknown";
+            return;
+        }
+
+        switch (result.State)
+        {
+            case DaemonApiResultState.Ok when result.Value is { } s:
+                _heroTone = StatusTone.From(s.Overall);
+                _heroLabel = "Running";
+                _heroPillLabel = s.Overall;
+                break;
+            case DaemonApiResultState.Unauthorized:
+                _heroTone = StatusToneKind.Warn;
+                _heroLabel = "Running";
+                _heroPillLabel = "unauthorized";
+                break;
+            default:
+                _heroTone = StatusToneKind.Bad;
+                _heroLabel = "Stopped";
+                _heroPillLabel = "stopped";
+                break;
+        }
+    }
+
+    private void ConfirmStop()
+    {
+        _actionMessage = null;
+        _pending = PendingAction.Stop;
+    }
+
+    private void ConfirmRestart()
+    {
+        _actionMessage = null;
+        _pending = PendingAction.Restart;
+    }
+
+    private void CancelPending() => _pending = null;
+
+    private void OnScrimClick() => _pending = null;
+
+    private void OnModalKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") _pending = null;
+    }
+
+    private async Task ExecutePendingAsync()
+    {
+        if (_pending is null) return;
+        var action = _pending.Value;
+        _pending = null;
+        _busy = true;
+        try
+        {
+            var stop = await StatusClient.StopAsync(reason: action == PendingAction.Restart ? "web-restart" : "web-stop");
+            if (!stop.Success)
+            {
+                _actionSuccess = false;
+                _actionMessage = stop.Message;
+                return;
+            }
+
+            // Wait up to ~15s for the lock to actually release before declaring success / starting.
+            var deadline = DateTime.UtcNow.AddSeconds(15);
+            while (DateTime.UtcNow < deadline && Launcher.IsLockFileHeld())
+                await Task.Delay(500);
+
+            if (Launcher.IsLockFileHeld())
+            {
+                _actionSuccess = false;
+                _actionMessage = "Daemon did not release its lock within 15s; not attempting start.";
+                return;
+            }
+
+            if (action == PendingAction.Restart)
+            {
+                var start = Launcher.Start();
+                _actionSuccess = start.Success;
+                _actionMessage = start.Message;
+            }
+            else
+            {
+                _actionSuccess = true;
+                _actionMessage = "Daemon stopped.";
+            }
+        }
+        finally
+        {
+            _busy = false;
+            // Don't refocus the trigger; if state flipped to stopped it's no longer rendered.
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task OnStartAsync()
+    {
+        _actionMessage = null;
+        _busy = true;
+        try
+        {
+            var start = Launcher.Start();
+            _actionSuccess = start.Success;
+            _actionMessage = start.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string FormatUptime(long seconds)
+    {
+        var t = TimeSpan.FromSeconds(seconds);
+        return t.TotalDays >= 1
+            ? $"{(int)t.TotalDays}d {t.Hours}h {t.Minutes}m"
+            : t.TotalHours >= 1
+                ? $"{(int)t.TotalHours}h {t.Minutes}m {t.Seconds}s"
+                : $"{t.Minutes}m {t.Seconds}s";
+    }
+
+    public void Dispose()
+    {
+        Feed.Updated -= OnFeedUpdated;
+    }
+}

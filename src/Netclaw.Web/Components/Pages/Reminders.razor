@@ -1,0 +1,589 @@
+@page "/reminders"
+@rendermode RenderMode.InteractiveServer
+@inject DaemonClientService Client
+
+<div class="nc-page-head">
+    <div>
+        <h1 class="nc-h1">Reminders</h1>
+        <p class="nc-sub">Scheduled automations</p>
+    </div>
+    @if (_loadResult?.State == DaemonApiResultState.Ok && !_showForm)
+    {
+        <div>
+            <button class="nc-btn nc-btn--primary" @onclick="OpenCreateForm">+ New reminder</button>
+        </div>
+    }
+</div>
+
+@if (_loadResult is null)
+{
+    <section class="nc-card"><div class="nc-card__body"><em>Loading…</em></div></section>
+}
+else if (_loadResult.State == DaemonApiResultState.Unauthorized)
+{
+    <div class="nc-banner nc-banner--warn">
+        <div>
+            <div class="nc-banner__title">Unauthorized</div>
+            <div class="nc-banner__detail">Pair this host with the daemon to obtain a device token.</div>
+        </div>
+    </div>
+}
+else if (_loadResult.State == DaemonApiResultState.Unreachable)
+{
+    <div class="nc-banner nc-banner--bad">
+        <div>
+            <div class="nc-banner__title">Daemon unreachable</div>
+            <div class="nc-banner__detail">@(_loadResult.ErrorDetail ?? "Endpoint did not respond.")</div>
+        </div>
+    </div>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(_actionError))
+    {
+        <div class="nc-banner nc-banner--bad" style="margin-bottom:16px;">
+            <div>
+                <div class="nc-banner__title">Action failed</div>
+                <div class="nc-banner__detail">@_actionError</div>
+            </div>
+        </div>
+    }
+
+    @if (_showForm)
+    {
+        <section class="nc-card" style="margin-bottom:16px;">
+            <header class="nc-card__head">
+                <h2 class="nc-h2">New reminder</h2>
+            </header>
+            <div class="nc-card__body nc-form">
+                @if (!string.IsNullOrEmpty(_formError))
+                {
+                    <div class="nc-banner nc-banner--bad" style="margin-bottom:12px;">
+                        <div>
+                            <div class="nc-banner__title">Save failed</div>
+                            <div class="nc-banner__detail">@_formError</div>
+                        </div>
+                    </div>
+                }
+                @if (_validateResult is not null)
+                {
+                    @if (_validateResult.Valid)
+                    {
+                        <div class="nc-banner nc-banner--info" style="margin-bottom:12px;">
+                            <div>
+                                <div class="nc-banner__title">Schedule valid</div>
+                                <div class="nc-banner__detail">
+                                    Type: @_validateResult.ScheduleType
+                                    @if (_validateResult.NextFire.HasValue)
+                                    {
+                                        <span> · Next: @_validateResult.NextFire.Value.ToString("yyyy-MM-dd HH:mm 'UTC'")</span>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="nc-banner nc-banner--bad" style="margin-bottom:12px;">
+                            <div>
+                                <div class="nc-banner__title">Invalid schedule</div>
+                                <div class="nc-banner__detail">@_validateResult.Error</div>
+                            </div>
+                        </div>
+                    }
+                }
+
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                    <label class="nc-field">
+                        <span>Name <span style="color:var(--nc-bad);">*</span></span>
+                        <input class="nc-input" type="text" placeholder="e.g. Daily standup brief"
+                               @bind="_form.Name" @bind:event="oninput" />
+                    </label>
+                    <label class="nc-field">
+                        <span>Audience</span>
+                        <input class="nc-input" type="text" placeholder="e.g. personal (leave blank for default)"
+                               @bind="_form.Audience" @bind:event="oninput" />
+                    </label>
+                </div>
+
+                <label class="nc-field" style="margin-top:10px;">
+                    <span>Prompt <span style="color:var(--nc-bad);">*</span></span>
+                    <textarea class="nc-input nc-input--mono" rows="3"
+                              placeholder="What the agent should do when this reminder fires…"
+                              @bind="_form.Prompt" @bind:event="oninput"></textarea>
+                </label>
+
+                <div style="display:grid; grid-template-columns:200px 1fr; gap:12px; margin-top:10px; align-items:end;">
+                    <label class="nc-field">
+                        <span>Schedule type <span style="color:var(--nc-bad);">*</span></span>
+                        <select class="nc-input" @bind="_form.ScheduleType">
+                            <option value="cron">cron</option>
+                            <option value="interval">interval</option>
+                            <option value="once">once</option>
+                        </select>
+                    </label>
+                    <label class="nc-field">
+                        <span>
+                            Schedule expression <span style="color:var(--nc-bad);">*</span>
+                            <span class="nc-mono-sm" style="color:var(--nc-fg-dim); margin-left:6px;">
+                                @ScheduleHint(_form.ScheduleType)
+                            </span>
+                        </span>
+                        <input class="nc-input nc-input--mono" type="text"
+                               placeholder="@SchedulePlaceholder(_form.ScheduleType)"
+                               @bind="_form.Schedule" @bind:event="oninput" />
+                    </label>
+                </div>
+
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-top:10px;">
+                    <label class="nc-field">
+                        <span>Delivery kind</span>
+                        <select class="nc-input" @bind="_form.DeliveryKind">
+                            <option value="">inherited</option>
+                            <option value="agent">agent</option>
+                            <option value="channel">channel</option>
+                            <option value="slack">slack</option>
+                            <option value="discord">discord</option>
+                        </select>
+                    </label>
+                    <label class="nc-field">
+                        <span>Delivery transport</span>
+                        <input class="nc-input" type="text" placeholder="e.g. slack, discord"
+                               @bind="_form.DeliveryTransport" @bind:event="oninput" />
+                    </label>
+                    <label class="nc-field">
+                        <span>Delivery address</span>
+                        <input class="nc-input" type="text" placeholder="e.g. channel ID or username"
+                               @bind="_form.DeliveryAddress" @bind:event="oninput" />
+                    </label>
+                </div>
+
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:10px;">
+                    <label class="nc-field">
+                        <span>Expires in</span>
+                        <input class="nc-input" type="text" placeholder="e.g. 7d, 24h (leave blank = no expiry)"
+                               @bind="_form.ExpiresIn" @bind:event="oninput" />
+                    </label>
+                    <div></div>
+                </div>
+
+                <div style="margin-top:16px; display:flex; gap:8px; flex-wrap:wrap;">
+                    <button class="nc-btn" disabled="@_formBusy" @onclick="ValidateFormAsync">
+                        @(_validating ? "Checking…" : "Validate schedule")
+                    </button>
+                    <button class="nc-btn nc-btn--primary" disabled="@_formBusy" @onclick="SaveFormAsync">
+                        @(_saving ? "Saving…" : "Save")
+                    </button>
+                    <button class="nc-btn" @onclick="CancelForm">Cancel</button>
+                </div>
+            </div>
+        </section>
+    }
+
+    @if (_loadResult.Value is { Count: 0 } && !_showForm)
+    {
+        <section class="nc-card">
+            <div class="nc-card__body" style="text-align:center; padding:32px 0; color:var(--nc-fg-muted);">
+                <div style="font-size:15px; margin-bottom:10px;">No reminders configured yet.</div>
+                <button class="nc-btn nc-btn--primary" @onclick="OpenCreateForm">+ New reminder</button>
+            </div>
+        </section>
+    }
+    else if (_loadResult.Value is { Count: > 0 } items)
+    {
+        <section class="nc-card">
+            <div class="nc-row-list">
+                @foreach (var item in items)
+                {
+                    var isExpanded = _expandedId == item.Id;
+                    <div>
+                        <div class="nc-row" style="grid-template-columns: 1fr auto auto auto auto;">
+                            <div>
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <span class="nc-row__name">@item.Title</span>
+                                    @if (!item.Enabled)
+                                    {
+                                        <span class="nc-pill" style="color:var(--nc-fg-dim);">disabled</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="nc-pill nc-pill--accent">enabled</span>
+                                    }
+                                </div>
+                                <div class="nc-row__sub nc-mono-sm">@item.Id</div>
+                                <div style="font-size:12px; color:var(--nc-fg-muted); margin-top:2px;">
+                                    <span>@item.Schedule</span>
+                                    @if (!string.IsNullOrEmpty(item.NextFire))
+                                    {
+                                        <span style="margin-left:8px;">· next: @item.NextFire</span>
+                                    }
+                                    @if (!string.IsNullOrEmpty(item.Audience))
+                                    {
+                                        <span style="margin-left:8px;">· @item.Audience</span>
+                                    }
+                                </div>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <button class="nc-btn" style="font-size:12px; padding:3px 8px;"
+                                        @onclick="@(() => ToggleHistoryAsync(item.Id))">
+                                    @(isExpanded ? "▲ hide" : "▼ history")
+                                </button>
+                                @if (item.Enabled)
+                                {
+                                    <button class="nc-btn" style="font-size:12px; padding:3px 8px;"
+                                            disabled="@(_togglingId == item.Id)"
+                                            @onclick="@(() => DisableAsync(item.Id))">
+                                        @(_togglingId == item.Id ? "…" : "Disable")
+                                    </button>
+                                }
+                                else
+                                {
+                                    <button class="nc-btn nc-btn--primary" style="font-size:12px; padding:3px 8px;"
+                                            disabled="@(_togglingId == item.Id)"
+                                            @onclick="@(() => EnableAsync(item.Id))">
+                                        @(_togglingId == item.Id ? "…" : "Enable")
+                                    </button>
+                                }
+                                <button class="nc-btn" style="font-size:12px; padding:3px 8px; color:var(--nc-bad);"
+                                        disabled="@(_deletingId == item.Id)"
+                                        @onclick="@(() => DeleteAsync(item.Id))">
+                                    @(_deletingId == item.Id ? "…" : "Delete")
+                                </button>
+                            </div>
+                        </div>
+
+                        @if (isExpanded)
+                        {
+                            <div style="padding:0 16px 12px; border-top:1px solid var(--nc-border-sub); margin-top:0;">
+                                @if (_historyLoading)
+                                {
+                                    <em style="font-size:13px; color:var(--nc-fg-muted);">Loading history…</em>
+                                }
+                                else if (_historyError is not null)
+                                {
+                                    <span style="font-size:13px; color:var(--nc-bad);">@_historyError</span>
+                                }
+                                else if (_expandedHistory is { Count: 0 })
+                                {
+                                    <span style="font-size:13px; color:var(--nc-fg-muted);">No execution history yet.</span>
+                                }
+                                else if (_expandedHistory is not null)
+                                {
+                                    <table style="width:100%; border-collapse:collapse; font-size:12px; margin-top:6px;">
+                                        <thead>
+                                            <tr style="color:var(--nc-fg-dim); text-align:left; border-bottom:1px solid var(--nc-border-sub);">
+                                                <th style="padding:4px 8px 4px 0;">Fired at</th>
+                                                <th style="padding:4px 8px;">Result</th>
+                                                <th style="padding:4px 8px;">Duration</th>
+                                                <th style="padding:4px 8px;">Session</th>
+                                                <th style="padding:4px 8px;">Error</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var h in _expandedHistory.AsEnumerable().Reverse())
+                                            {
+                                                <tr style="border-bottom:1px solid var(--nc-border-sub);">
+                                                    <td style="padding:4px 8px 4px 0; font-family:monospace; white-space:nowrap;">
+                                                        @h.FiredAt.ToString("yyyy-MM-dd HH:mm 'UTC'")
+                                                    </td>
+                                                    <td style="padding:4px 8px;">
+                                                        @if (h.Success)
+                                                        {
+                                                            <span class="nc-pill nc-pill--accent">ok</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="nc-pill" style="color:var(--nc-bad);">failed</span>
+                                                        }
+                                                    </td>
+                                                    <td style="padding:4px 8px; font-family:monospace;">@h.DurationMs ms</td>
+                                                    <td style="padding:4px 8px; font-family:monospace; font-size:11px; color:var(--nc-fg-dim);">@h.SessionId</td>
+                                                    <td style="padding:4px 8px; color:var(--nc-bad); font-size:11px;">@h.ErrorMessage</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </section>
+    }
+}
+
+@code {
+    private DaemonApiResult<List<ReminderWire.ListItem>>? _loadResult;
+    private string? _actionError;
+
+    // Create form state
+    private bool _showForm;
+    private bool _formBusy;
+    private bool _saving;
+    private bool _validating;
+    private string? _formError;
+    private ReminderWire.ValidateResponse? _validateResult;
+    private FormModel _form = new();
+
+    // Row action state
+    private string? _togglingId;
+    private string? _deletingId;
+
+    // History expand state
+    private string? _expandedId;
+    private List<ReminderWire.HistoryRecord>? _expandedHistory;
+    private bool _historyLoading;
+    private string? _historyError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshListAsync();
+    }
+
+    private async Task RefreshListAsync()
+    {
+        _loadResult = await Client.ListRemindersAsync();
+    }
+
+    private void OpenCreateForm()
+    {
+        _form = new FormModel();
+        _validateResult = null;
+        _formError = null;
+        _showForm = true;
+    }
+
+    private void CancelForm()
+    {
+        _showForm = false;
+        _validateResult = null;
+        _formError = null;
+    }
+
+    private async Task ValidateFormAsync()
+    {
+        if (!BuildRequest(out var req, out var validationErr))
+        {
+            _formError = validationErr;
+            return;
+        }
+
+        _validating = true;
+        _formBusy = true;
+        _validateResult = null;
+        _formError = null;
+
+        var result = await Client.ValidateReminderAsync(req!);
+        _validating = false;
+        _formBusy = false;
+
+        if (result.State != DaemonApiResultState.Ok)
+        {
+            _formError = result.ErrorDetail ?? "Could not reach daemon.";
+        }
+        else
+        {
+            _validateResult = result.Value;
+        }
+    }
+
+    private async Task SaveFormAsync()
+    {
+        if (!BuildRequest(out var req, out var validationErr))
+        {
+            _formError = validationErr;
+            return;
+        }
+
+        _saving = true;
+        _formBusy = true;
+        _formError = null;
+
+        var result = await Client.CreateReminderAsync(req!);
+        _saving = false;
+        _formBusy = false;
+
+        switch (result.State)
+        {
+            case DaemonApiResultState.Ok when string.IsNullOrEmpty(result.Value?.Error):
+                _showForm = false;
+                _validateResult = null;
+                await RefreshListAsync();
+                break;
+            case DaemonApiResultState.Ok:
+                _formError = result.Value!.Error;
+                break;
+            case DaemonApiResultState.Unauthorized:
+                _formError = "Unauthorized — pair this host with the daemon.";
+                break;
+            case DaemonApiResultState.Unreachable:
+                _formError = result.ErrorDetail ?? "Daemon unreachable.";
+                break;
+        }
+    }
+
+    private bool BuildRequest(out ReminderWire.CreateRequest? req, out string? error)
+    {
+        if (string.IsNullOrWhiteSpace(_form.Name))
+        {
+            req = null;
+            error = "Name is required.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(_form.Prompt))
+        {
+            req = null;
+            error = "Prompt is required.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(_form.Schedule))
+        {
+            req = null;
+            error = "Schedule expression is required.";
+            return false;
+        }
+
+        req = new ReminderWire.CreateRequest
+        {
+            Name = _form.Name.Trim(),
+            Prompt = _form.Prompt.Trim(),
+            ScheduleType = _form.ScheduleType,
+            Schedule = _form.Schedule.Trim(),
+            DeliveryKind = string.IsNullOrWhiteSpace(_form.DeliveryKind) ? null : _form.DeliveryKind,
+            DeliveryTransport = string.IsNullOrWhiteSpace(_form.DeliveryTransport) ? null : _form.DeliveryTransport.Trim(),
+            DeliveryAddress = string.IsNullOrWhiteSpace(_form.DeliveryAddress) ? null : _form.DeliveryAddress.Trim(),
+            DeliveryRequired = true,
+            Audience = string.IsNullOrWhiteSpace(_form.Audience) ? null : _form.Audience.Trim(),
+            ExpiresIn = string.IsNullOrWhiteSpace(_form.ExpiresIn) ? null : _form.ExpiresIn.Trim(),
+        };
+        error = null;
+        return true;
+    }
+
+    private async Task ToggleHistoryAsync(string id)
+    {
+        if (_expandedId == id)
+        {
+            _expandedId = null;
+            _expandedHistory = null;
+            _historyError = null;
+            return;
+        }
+
+        _expandedId = id;
+        _expandedHistory = null;
+        _historyError = null;
+        _historyLoading = true;
+
+        var result = await Client.GetReminderHistoryAsync(id);
+        _historyLoading = false;
+
+        if (result.State != DaemonApiResultState.Ok)
+        {
+            _historyError = result.ErrorDetail ?? "Could not load history.";
+        }
+        else
+        {
+            _expandedHistory = result.Value;
+        }
+    }
+
+    private async Task DisableAsync(string id)
+    {
+        _togglingId = id;
+        _actionError = null;
+
+        var result = await Client.DisableReminderAsync(id);
+        _togglingId = null;
+
+        if (result.State != DaemonApiResultState.Ok)
+        {
+            _actionError = result.ErrorDetail ?? "Could not disable reminder.";
+        }
+        else if (!string.IsNullOrEmpty(result.Value?.Error))
+        {
+            _actionError = result.Value.Error;
+        }
+        else
+        {
+            await RefreshListAsync();
+        }
+    }
+
+    private async Task EnableAsync(string id)
+    {
+        _togglingId = id;
+        _actionError = null;
+
+        var result = await Client.EnableReminderAsync(id);
+        _togglingId = null;
+
+        if (result.State != DaemonApiResultState.Ok)
+        {
+            _actionError = result.ErrorDetail ?? "Could not enable reminder.";
+        }
+        else if (!string.IsNullOrEmpty(result.Value?.Error))
+        {
+            _actionError = result.Value.Error;
+        }
+        else
+        {
+            await RefreshListAsync();
+        }
+    }
+
+    private async Task DeleteAsync(string id)
+    {
+        _deletingId = id;
+        _actionError = null;
+
+        var result = await Client.DeleteReminderAsync(id, permanent: true);
+        _deletingId = null;
+
+        if (result.State != DaemonApiResultState.Ok)
+        {
+            _actionError = result.ErrorDetail ?? "Could not delete reminder.";
+        }
+        else if (!string.IsNullOrEmpty(result.Value?.Error))
+        {
+            _actionError = result.Value.Error;
+        }
+        else
+        {
+            if (_expandedId == id) { _expandedId = null; _expandedHistory = null; }
+            await RefreshListAsync();
+        }
+    }
+
+    private static string ScheduleHint(string type) => type switch
+    {
+        "cron" => "5-field cron",
+        "interval" => "e.g. 30m, 2h, 1d",
+        "once" => "relative or ISO 8601",
+        _ => string.Empty,
+    };
+
+    private static string SchedulePlaceholder(string type) => type switch
+    {
+        "cron" => "0 9 * * 1-5",
+        "interval" => "1h",
+        "once" => "30m",
+        _ => string.Empty,
+    };
+
+    private sealed class FormModel
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Prompt { get; set; } = string.Empty;
+        public string ScheduleType { get; set; } = "cron";
+        public string Schedule { get; set; } = string.Empty;
+        public string? DeliveryKind { get; set; }
+        public string? DeliveryTransport { get; set; }
+        public string? DeliveryAddress { get; set; }
+        public string? Audience { get; set; }
+        public string? ExpiresIn { get; set; }
+    }
+}

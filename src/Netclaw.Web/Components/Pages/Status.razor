@@ -1,0 +1,261 @@
+@page "/"
+@page "/status"
+@implements IDisposable
+@inject DaemonStatusFeed Feed
+
+<div class="nc-page-head">
+    <div>
+        <h1 class="nc-h1">Status</h1>
+        <p class="nc-sub">Polling every 3s · endpoint <code>@Feed.Endpoint</code></p>
+    </div>
+</div>
+
+@if (_result is null)
+{
+    <section class="nc-card">
+        <div class="nc-card__body"><em>Loading…</em></div>
+    </section>
+}
+else
+{
+    switch (_result.State)
+    {
+        case DaemonApiResultState.Unreachable:
+            <div class="nc-banner nc-banner--bad">
+                <div>
+                    <div class="nc-banner__title">Daemon unreachable</div>
+                    <div class="nc-banner__detail">
+                        @(_result.ErrorDetail ?? "No response from the configured endpoint.")
+                        Retrying every 3s.
+                    </div>
+                </div>
+            </div>
+            break;
+
+        case DaemonApiResultState.Unauthorized:
+            <div class="nc-banner nc-banner--warn">
+                <div>
+                    <div class="nc-banner__title">Unauthorized</div>
+                    <div class="nc-banner__detail">Pair this host with the daemon to obtain a device token.</div>
+                </div>
+            </div>
+            break;
+
+        case DaemonApiResultState.Ok when _result.Value is { } status:
+            var overallTone = StatusTone.From(status.Overall);
+            <div class="nc-grid-status-hero">
+                <div class="@StatusTone.CardStatusClass(overallTone)">
+                    <div class="nc-kpi__label">Overall</div>
+                    <div style="display:flex; align-items:baseline; gap:12px; margin-top:6px;">
+                        <span style="font-size:22px; font-weight:600; letter-spacing:-0.4px; text-transform:capitalize;">@status.Overall</span>
+                        <span class="@StatusTone.PillClass(overallTone)">@OverallSubLabel(overallTone)</span>
+                    </div>
+                    <div class="nc-kpi__sub">@ConnectorSummary(status)</div>
+                </div>
+
+                <div class="nc-card nc-card--kpi">
+                    <div class="nc-kpi__label">Uptime</div>
+                    <div class="nc-kpi__value">@FormatUptime(status.Process.UptimeSeconds)</div>
+                    <div class="nc-kpi__sub">since @status.Process.StartedAtUtc.ToString("HH:mm 'UTC'")</div>
+                </div>
+
+                <div class="nc-card nc-card--kpi">
+                    <div class="nc-kpi__label">Build</div>
+                    <div class="nc-kpi__value">@status.Build.Version</div>
+                    <div class="nc-kpi__sub">@status.Build.CommitHash</div>
+                </div>
+
+                <div class="nc-card nc-card--kpi">
+                    <div class="nc-kpi__label">Model</div>
+                    @if (status.Model is { } model)
+                    {
+                        <div class="nc-kpi__value">@(model.DisplayName ?? model.ModelId)</div>
+                        <div class="nc-kpi__sub">@model.Provider · @model.ContextWindow.ToString("N0") ctx</div>
+                    }
+                    else
+                    {
+                        <div class="nc-kpi__value" style="color:var(--nc-fg-muted);">—</div>
+                        <div class="nc-kpi__sub">not reported</div>
+                    }
+                </div>
+            </div>
+
+            <div class="nc-grid-status-main">
+                <section class="nc-card">
+                    <header class="nc-card__head">
+                        <h2 class="nc-h2">Connectors</h2>
+                        <div class="nc-card__head-meta">@ConnectorCounts(status)</div>
+                    </header>
+                    <div class="nc-card__body">
+                        @if (status.Connectors.Count == 0)
+                        {
+                            <p style="color:var(--nc-fg-muted); margin:0;">No connectors registered.</p>
+                        }
+                        else
+                        {
+                            <div class="nc-row-list">
+                                @foreach (var c in status.Connectors)
+                                {
+                                    var tone = c.Enabled ? StatusTone.From(c.Status) : StatusToneKind.Neutral;
+                                    var label = c.Enabled ? c.Status : "disabled";
+                                    <div class="nc-row" style="grid-template-columns: 140px 1fr auto;">
+                                        <div>
+                                            <div class="nc-row__name">@c.DisplayName</div>
+                                            <div class="nc-row__sub">@c.Key</div>
+                                        </div>
+                                        <div class="nc-row__msg">@(string.IsNullOrWhiteSpace(c.Message) ? "—" : c.Message)</div>
+                                        <span class="@StatusTone.PillClass(tone)">@label</span>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                </section>
+
+                <section class="nc-card">
+                    <header class="nc-card__head">
+                        <h2 class="nc-h2">Process &amp; build</h2>
+                    </header>
+                    <div class="nc-card__body">
+                        <dl class="nc-kv">
+                            <dt>PID</dt>         <dd class="nc-kv__val--mono">@status.Process.Pid</dd>
+                            <dt>Started</dt>     <dd class="nc-kv__val--mono">@status.Process.StartedAtUtc.ToString("yyyy-MM-dd HH:mm 'UTC'")</dd>
+                            <dt>Commit</dt>      <dd class="nc-kv__val--mono">@status.Build.CommitHash</dd>
+                            <dt>Built</dt>       <dd class="nc-kv__val--mono">@status.Build.BuildTimestamp</dd>
+                            <dt>Persistence</dt> <dd>@status.Persistence.Provider</dd>
+                            <dt>Telemetry</dt>   <dd>@(status.Telemetry.Enabled ? $"on · {status.Telemetry.OtlpEndpoint ?? "default"}" : "off")</dd>
+                        </dl>
+                    </div>
+                </section>
+            </div>
+
+            <div class="nc-grid-status-foot">
+                <section class="nc-card">
+                    <header class="nc-card__head">
+                        <h2 class="nc-h2">Memory</h2>
+                        @if (status.Memory is { } m)
+                        {
+                            var memTone = StatusTone.From(m.Status);
+                            <span class="@StatusTone.PillClass(memTone)">@m.Status</span>
+                        }
+                    </header>
+                    <div class="nc-card__body">
+                        @if (status.Memory is { } memory)
+                        {
+                            <div style="font-size:20px; font-weight:600; letter-spacing:-0.3px;">
+                                @(memory.PendingCheckpoints ?? 0)
+                                <span style="font-weight:400; color:var(--nc-fg-muted); font-size:13px;">pending checkpoints</span>
+                            </div>
+                            <div class="nc-mono-sm" style="color:var(--nc-fg-dim); margin-top:6px; word-break:break-all;">
+                                @(memory.DatabasePath ?? memory.Provider)
+                            </div>
+                        }
+                        else
+                        {
+                            <span style="color:var(--nc-fg-muted);">Not reported.</span>
+                        }
+                    </div>
+                </section>
+
+                <section class="nc-card">
+                    <header class="nc-card__head">
+                        <h2 class="nc-h2">Reminders</h2>
+                    </header>
+                    <div class="nc-card__body">
+                        @if (status.Reminders is { } r)
+                        {
+                            <div style="display:flex; gap:18px;">
+                                <div><div style="font-size:20px; font-weight:600;">@r.ScheduledCount</div><div style="font-size:12px; color:var(--nc-fg-muted);">scheduled</div></div>
+                                <div><div style="font-size:20px; font-weight:600;">@r.ActiveExecutions</div><div style="font-size:12px; color:var(--nc-fg-muted);">active</div></div>
+                                <div><div style="font-size:20px; font-weight:600; color:@(r.FailedCount > 0 ? "var(--nc-bad)" : "inherit");">@r.FailedCount</div><div style="font-size:12px; color:var(--nc-fg-muted);">failed</div></div>
+                            </div>
+                        }
+                        else
+                        {
+                            <span style="color:var(--nc-fg-muted);">Not reported.</span>
+                        }
+                    </div>
+                </section>
+
+                <section class="nc-card">
+                    <header class="nc-card__head">
+                        <h2 class="nc-h2">Update</h2>
+                    </header>
+                    <div class="nc-card__body" style="font-size:12.5px; line-height:1.6;">
+                        @if (status.Update is { } u)
+                        {
+                            <dl class="nc-kv">
+                                <dt>State</dt>   <dd>@u.State</dd>
+                                <dt>Current</dt> <dd class="nc-kv__val--mono">@u.CurrentVersion</dd>
+                                @if (u.LatestVersion is { } latest)
+                                {
+                                    <dt>Latest</dt> <dd class="nc-kv__val--mono">@latest</dd>
+                                }
+                                <dt>Self-update</dt> <dd>@(u.SelfUpdateDisabled ? "disabled" : "enabled")</dd>
+                            </dl>
+                        }
+                        else
+                        {
+                            <span style="color:var(--nc-fg-muted);">Update state unknown.</span>
+                        }
+                    </div>
+                </section>
+            </div>
+            break;
+    }
+}
+
+@code {
+    private DaemonApiResult<DaemonRuntimeStatus.Response>? _result;
+
+    protected override void OnInitialized()
+    {
+        _result = Feed.Current;
+        Feed.Updated += OnFeedUpdated;
+    }
+
+    private void OnFeedUpdated(DaemonApiResult<DaemonRuntimeStatus.Response> result)
+    {
+        _result = result;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private static string FormatUptime(long seconds)
+    {
+        var t = TimeSpan.FromSeconds(seconds);
+        return t.TotalDays >= 1
+            ? $"{(int)t.TotalDays}d {t.Hours}h {t.Minutes}m"
+            : t.TotalHours >= 1
+                ? $"{(int)t.TotalHours}h {t.Minutes}m"
+                : $"{t.Minutes}m {t.Seconds}s";
+    }
+
+    private static string OverallSubLabel(StatusToneKind tone) => tone switch
+    {
+        StatusToneKind.Good => "all systems",
+        StatusToneKind.Warn => "degraded",
+        StatusToneKind.Bad => "failing",
+        _ => "unknown",
+    };
+
+    private static string ConnectorSummary(DaemonRuntimeStatus.Response s)
+    {
+        var active = s.Connectors.Count(c => c.Enabled);
+        var disabled = s.Connectors.Count - active;
+        return disabled == 0
+            ? $"{active} connector{(active == 1 ? string.Empty : "s")} active"
+            : $"{active} active · {disabled} disabled";
+    }
+
+    private static string ConnectorCounts(DaemonRuntimeStatus.Response s)
+    {
+        var active = s.Connectors.Count(c => c.Enabled);
+        var disabled = s.Connectors.Count - active;
+        return disabled == 0 ? $"{active} active" : $"{active} active · {disabled} disabled";
+    }
+
+    public void Dispose()
+    {
+        Feed.Updated -= OnFeedUpdated;
+    }
+}

@@ -1,0 +1,282 @@
+@page "/connectors/mcp"
+@using Microsoft.JSInterop
+@rendermode RenderMode.InteractiveServer
+@implements IAsyncDisposable
+@inject DaemonClientService Client
+@inject IJSRuntime JS
+
+<div class="nc-page-head">
+    <div>
+        <h1 class="nc-h1">MCP Servers</h1>
+        <p class="nc-sub">Model Context Protocol servers &amp; connection status</p>
+    </div>
+    <button class="nc-btn" @onclick="RefreshAsync" disabled="@_loading">
+        @(_loading ? "Refreshing…" : "Refresh")
+    </button>
+</div>
+
+@if (_result is null)
+{
+    <section class="nc-card"><div class="nc-card__body"><em>Loading…</em></div></section>
+}
+else if (_result.State == DaemonApiResultState.Unauthorized)
+{
+    <div class="nc-banner nc-banner--warn">
+        <div>
+            <div class="nc-banner__title">Unauthorized</div>
+            <div class="nc-banner__detail">Pair this host with the daemon to obtain a device token.</div>
+        </div>
+    </div>
+}
+else if (_result.State == DaemonApiResultState.Unreachable)
+{
+    <div class="nc-banner nc-banner--bad">
+        <div>
+            <div class="nc-banner__title">Daemon unreachable</div>
+            <div class="nc-banner__detail">@(_result.ErrorDetail ?? "No response from the configured endpoint.")</div>
+        </div>
+    </div>
+}
+else if (_result.Value is { } servers)
+{
+    if (servers.Count == 0)
+    {
+        <div class="nc-banner nc-banner--warn">
+            <div>
+                <div class="nc-banner__title">No MCP servers configured</div>
+                <div class="nc-banner__detail">Add servers under <code>McpServers</code> in <code>netclaw.json</code>.</div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="nc-row-list" style="display:flex; flex-direction:column; gap:10px;">
+            @foreach (var kvp in servers.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                var name = kvp.Key;
+                var status = kvp.Value;
+                var tone = StateTone(status.State);
+                var expanded = _expanded.Contains(name);
+                var oauthPending = _oauthPending.Contains(name);
+                var oauthError = _oauthErrors.GetValueOrDefault(name);
+                var needsOAuth = string.Equals(status.State, "AwaitingAuth", StringComparison.OrdinalIgnoreCase)
+                              || string.Equals(status.State, "AuthFailed", StringComparison.OrdinalIgnoreCase);
+
+                <section class="@StatusTone.CardStatusClass(tone)" style="padding:0; overflow:hidden;">
+                    <div style="padding:16px 20px; display:flex; align-items:center; gap:14px; cursor:pointer;"
+                         @onclick="@(() => ToggleExpand(name))">
+                        <span class="@StatusTone.DotClass(tone)" style="flex-shrink:0;"></span>
+                        <div style="flex:1; min-width:0;">
+                            <div style="font-weight:600; font-size:14px;">@name</div>
+                            <div style="font-size:12px; color:var(--nc-fg-muted); margin-top:1px;">
+                                @status.ToolCount tool@(status.ToolCount == 1 ? string.Empty : "s") · @status.State
+                            </div>
+                        </div>
+                        @if (needsOAuth)
+                        {
+                            <button class="nc-btn nc-btn--sm"
+                                    disabled="@oauthPending"
+                                    @onclick:stopPropagation="true"
+                                    @onclick="@(() => StartOAuthAsync(name))">
+                                @(oauthPending ? "Connecting…" : "Connect")
+                            </button>
+                        }
+                        <span class="@StatusTone.PillClass(tone)" style="flex-shrink:0;">@status.State</span>
+                        <span style="color:var(--nc-fg-dim); font-size:11px; flex-shrink:0;">@(expanded ? "▲" : "▼")</span>
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(status.Error))
+                    {
+                        <div style="padding:0 20px 12px; font-size:12px; color:var(--nc-bad);">
+                            @status.Error
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(oauthError))
+                    {
+                        <div style="padding:0 20px 12px; font-size:12px; color:var(--nc-bad);">
+                            OAuth: @oauthError
+                        </div>
+                    }
+
+                    @if (expanded)
+                    {
+                        <div style="border-top:1px solid var(--nc-border); padding:14px 20px;">
+                            @if (_tools.TryGetValue(name, out var tools))
+                            {
+                                @if (tools.Count == 0)
+                                {
+                                    <p style="margin:0; color:var(--nc-fg-muted); font-size:13px;">No tools exposed.</p>
+                                }
+                                else
+                                {
+                                    <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                                        @foreach (var tool in tools.OrderBy(t => t, StringComparer.OrdinalIgnoreCase))
+                                        {
+                                            <span class="nc-mono-sm" style="background:var(--nc-bg-dim); padding:2px 8px; border-radius:4px; font-size:11.5px;">@tool</span>
+                                        }
+                                    </div>
+                                }
+                            }
+                            else if (_toolsLoading.Contains(name))
+                            {
+                                <em style="font-size:13px; color:var(--nc-fg-muted);">Loading tools…</em>
+                            }
+                            else
+                            {
+                                <em style="font-size:13px; color:var(--nc-fg-muted);">Tools unavailable.</em>
+                            }
+                        </div>
+                    }
+                </section>
+            }
+        </div>
+    }
+}
+
+@code {
+    private DaemonApiResult<Dictionary<string, McpServerStatusWire>>? _result;
+    private bool _loading;
+
+    private readonly HashSet<string> _expanded = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<string>> _tools = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _toolsLoading = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _oauthPending = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _oauthErrors = new(StringComparer.Ordinal);
+
+    private PeriodicTimer? _pollTimer;
+    private CancellationTokenSource? _cts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _cts = new CancellationTokenSource();
+        _ = PollLoopAsync(_cts.Token);
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        _result = await Client.GetMcpStatusesAsync();
+        _loading = false;
+    }
+
+    private async Task PollLoopAsync(CancellationToken ct)
+    {
+        _pollTimer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+        try
+        {
+            while (await _pollTimer.WaitForNextTickAsync(ct))
+                await InvokeAsync(async () =>
+                {
+                    await LoadAsync();
+                    StateHasChanged();
+                });
+        }
+        catch (OperationCanceledException) { } // slopwatch-ignore: SW003 Intentional: loop exits cleanly when component is disposed.
+    }
+
+    private async Task RefreshAsync()
+    {
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    private async Task ToggleExpand(string name)
+    {
+        if (!_expanded.Add(name))
+        {
+            _expanded.Remove(name);
+            return;
+        }
+
+        if (!_tools.ContainsKey(name))
+        {
+            _toolsLoading.Add(name);
+            StateHasChanged();
+
+            var result = await Client.GetMcpToolsAsync(name);
+            _toolsLoading.Remove(name);
+            if (result.Value is { } tools)
+                _tools[name] = tools;
+        }
+    }
+
+    private async Task StartOAuthAsync(string name)
+    {
+        _oauthPending.Add(name);
+        _oauthErrors.Remove(name);
+        StateHasChanged();
+
+        var result = await Client.StartMcpOAuthAsync(name);
+        if (result.State != DaemonApiResultState.Ok || result.Value is null)
+        {
+            _oauthErrors[name] = result.ErrorDetail ?? "Failed to start OAuth flow.";
+            _oauthPending.Remove(name);
+            StateHasChanged();
+            return;
+        }
+
+        await JS.InvokeVoidAsync("open", result.Value.AuthorizationUrl, "_blank");
+        _ = PollOAuthStatusAsync(name);
+    }
+
+    private async Task PollOAuthStatusAsync(string name)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        try
+        {
+            for (var attempts = 0; attempts < 60 && await timer.WaitForNextTickAsync(); attempts++)
+            {
+                var r = await Client.GetMcpOAuthStatusAsync(name);
+                if (r.Value is null) continue;
+
+                var status = r.Value.Status;
+                if (string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase))
+                {
+                    await InvokeAsync(async () =>
+                    {
+                        _oauthPending.Remove(name);
+                        await LoadAsync();
+                        StateHasChanged();
+                    });
+                    return;
+                }
+
+                if (string.Equals(status, "Failed", StringComparison.OrdinalIgnoreCase))
+                {
+                    await InvokeAsync(() =>
+                    {
+                        _oauthPending.Remove(name);
+                        _oauthErrors[name] = "OAuth authorization failed.";
+                        StateHasChanged();
+                    });
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) { } // slopwatch-ignore: SW003 Intentional: component dispose cancels the poll timer.
+        await InvokeAsync(() =>
+        {
+            _oauthPending.Remove(name);
+            StateHasChanged();
+        });
+    }
+
+    private static StatusToneKind StateTone(string state) => state switch
+    {
+        "Connected" => StatusToneKind.Good,
+        "AwaitingAuth" or "AuthFailed" => StatusToneKind.Warn,
+        "Unreachable" or "Disabled" => StatusToneKind.Bad,
+        _ => StatusToneKind.Neutral,
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_cts is not null)
+            await _cts.CancelAsync();
+        _cts?.Dispose();
+        _pollTimer?.Dispose();
+    }
+}

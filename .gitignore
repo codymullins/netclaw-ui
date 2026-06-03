@@ -427,3 +427,9 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# JetBrains IDEs
+.idea/
+
+# macOS
+.DS_Store

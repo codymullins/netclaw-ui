@@ -1,0 +1,132 @@
+@implements IDisposable
+@inject DaemonStatusFeed Feed
+
+@if (_result is null)
+{
+    <section class="nc-card"><div class="nc-card__body"><em>Loading…</em></div></section>
+}
+else
+{
+    switch (_result.State)
+    {
+        case DaemonApiResultState.Unreachable:
+            <div class="nc-banner nc-banner--bad">
+                <div>
+                    <div class="nc-banner__title">Daemon unreachable</div>
+                    <div class="nc-banner__detail">@(_result.ErrorDetail ?? "No response from the configured endpoint.")</div>
+                </div>
+            </div>
+            break;
+        case DaemonApiResultState.Unauthorized:
+            <div class="nc-banner nc-banner--warn">
+                <div>
+                    <div class="nc-banner__title">Unauthorized</div>
+                    <div class="nc-banner__detail">Pair this host with the daemon to obtain a device token.</div>
+                </div>
+            </div>
+            break;
+        case DaemonApiResultState.Ok when _result.Value is { } status:
+            var connector = status.Connectors.FirstOrDefault(c =>
+                string.Equals(c.Key, "discord", StringComparison.OrdinalIgnoreCase));
+            var activity = status.Telemetry.Channels.FirstOrDefault(a =>
+                string.Equals(a.ChannelType, "Discord", StringComparison.OrdinalIgnoreCase));
+
+            if (connector is null)
+            {
+                <div class="nc-banner nc-banner--warn">
+                    <div>
+                        <div class="nc-banner__title">No Discord connector registered</div>
+                        <div class="nc-banner__detail">The daemon did not report a connector with key <code>discord</code>.</div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                var tone = connector.Enabled ? StatusTone.From(connector.Status) : StatusToneKind.Neutral;
+                <section class="@StatusTone.CardStatusClass(tone)" style="padding:22px 24px; margin-bottom:16px;">
+                    <div style="display:flex; align-items:baseline; gap:12px;">
+                        <span style="font-size:22px; font-weight:600; letter-spacing:-0.3px;">@connector.DisplayName</span>
+                        <span class="@StatusTone.PillClass(tone)">@(connector.Enabled ? connector.Status : "disabled")</span>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(connector.Message))
+                    {
+                        <div style="color:var(--nc-fg-muted); font-size:13px; margin-top:6px;">@connector.Message</div>
+                    }
+                </section>
+
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                    <section class="nc-card">
+                        <header class="nc-card__head"><h2 class="nc-h2">Connector</h2></header>
+                        <div class="nc-card__body">
+                            <dl class="nc-kv">
+                                <dt>Key</dt>     <dd class="nc-kv__val--mono">@connector.Key</dd>
+                                <dt>Display</dt> <dd>@connector.DisplayName</dd>
+                                <dt>Enabled</dt> <dd>@(connector.Enabled ? "yes" : "no")</dd>
+                                <dt>Status</dt>  <dd>@connector.Status</dd>
+                                <dt>Message</dt> <dd>@(string.IsNullOrWhiteSpace(connector.Message) ? "—" : connector.Message)</dd>
+                            </dl>
+                        </div>
+                    </section>
+
+                    <section class="nc-card">
+                        <header class="nc-card__head"><h2 class="nc-h2">Channel activity</h2></header>
+                        <div class="nc-card__body">
+                            @if (activity is null)
+                            {
+                                <p style="color:var(--nc-fg-muted); margin:0;">
+                                    No Discord channel telemetry yet. This is normal until the connector has handled its first event.
+                                </p>
+                            }
+                            else
+                            {
+                                <dl class="nc-kv">
+                                    <dt>Channel type</dt>    <dd class="nc-kv__val--mono">@activity.ChannelType</dd>
+                                    <dt>Display name</dt>    <dd>@activity.DisplayName</dd>
+                                    <dt>Events received</dt> <dd class="nc-kv__val--mono">@activity.EventsReceived</dd>
+                                    <dt>Events routed</dt>   <dd class="nc-kv__val--mono">@activity.EventsRouted</dd>
+                                    <dt>Events dropped</dt>  <dd class="nc-kv__val--mono">@activity.EventsDropped</dd>
+                                    <dt>Replies posted</dt>  <dd class="nc-kv__val--mono">@activity.RepliesPosted</dd>
+                                    <dt>Replies rejected</dt><dd class="nc-kv__val--mono">@activity.RepliesRejected</dd>
+                                    <dt>Replies failed</dt>  <dd class="nc-kv__val--mono">@activity.RepliesFailed</dd>
+                                </dl>
+                            }
+                        </div>
+                    </section>
+                </div>
+
+                @if (activity?.Extras is { Count: > 0 } extras)
+                {
+                    <section class="nc-card" style="margin-top:12px;">
+                        <header class="nc-card__head"><h2 class="nc-h2">Extras</h2></header>
+                        <div class="nc-card__body">
+                            <dl class="nc-kv">
+                                @foreach (var kvp in extras.OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    <dt class="nc-mono-sm">@kvp.Key</dt><dd class="nc-kv__val--mono">@kvp.Value</dd>
+                                }
+                            </dl>
+                        </div>
+                    </section>
+                }
+            }
+            break;
+    }
+}
+
+@code {
+    private DaemonApiResult<DaemonRuntimeStatus.Response>? _result;
+
+    protected override void OnInitialized()
+    {
+        _result = Feed.Current;
+        Feed.Updated += OnFeedUpdated;
+    }
+
+    private void OnFeedUpdated(DaemonApiResult<DaemonRuntimeStatus.Response> result)
+    {
+        _result = result;
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => Feed.Updated -= OnFeedUpdated;
+}

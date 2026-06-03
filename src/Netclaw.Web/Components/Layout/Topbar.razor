@@ -1,0 +1,105 @@
+@implements IDisposable
+@inject DaemonStatusFeed Feed
+
+<header class="nc-topbar">
+    <div class="nc-crumb">
+        @if (Crumbs is null || Crumbs.Count == 0)
+        {
+            <span>Netclaw</span>
+        }
+        else
+        {
+            <span>Netclaw</span>
+            @foreach (var (crumb, idx) in Crumbs.Select((c, i) => (c, i)))
+            {
+                <span class="nc-crumb__sep">/</span>
+                @if (idx == Crumbs.Count - 1)
+                {
+                    <span class="nc-crumb--active">@crumb</span>
+                }
+                else
+                {
+                    <span>@crumb</span>
+                }
+            }
+        }
+    </div>
+    <div class="nc-endpoint">
+        <span class="@StatusTone.DotClass(_tone)"></span>
+        <span>@_endpointLabel</span>
+        @if (!string.IsNullOrEmpty(_statusSuffix))
+        {
+            <span class="nc-endpoint__sep">·</span>
+            <span>@_statusSuffix</span>
+        }
+    </div>
+</header>
+
+@code {
+    [Parameter] public IReadOnlyList<string>? Crumbs { get; set; }
+
+    private string _endpointLabel = string.Empty;
+    private StatusToneKind _tone = StatusToneKind.Neutral;
+    private string _statusSuffix = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        _endpointLabel = StripScheme(Feed.Endpoint);
+        ApplyResult(Feed.Current);
+        Feed.Updated += OnFeedUpdated;
+    }
+
+    private void OnFeedUpdated(DaemonApiResult<DaemonRuntimeStatus.Response> result)
+    {
+        ApplyResult(result);
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void ApplyResult(DaemonApiResult<DaemonRuntimeStatus.Response>? result)
+    {
+        if (result is null)
+        {
+            _tone = StatusToneKind.Neutral;
+            _statusSuffix = "checking…";
+            return;
+        }
+
+        switch (result.State)
+        {
+            case DaemonApiResultState.Ok when result.Value is { } s:
+                _tone = StatusTone.From(s.Overall);
+                _statusSuffix = $"up {FormatUptime(s.Process.UptimeSeconds)}";
+                break;
+            case DaemonApiResultState.Unauthorized:
+                _tone = StatusToneKind.Warn;
+                _statusSuffix = "unauthorized";
+                break;
+            default:
+                _tone = StatusToneKind.Bad;
+                _statusSuffix = "unreachable";
+                break;
+        }
+    }
+
+    private static string FormatUptime(long seconds)
+    {
+        var t = TimeSpan.FromSeconds(seconds);
+        return t.TotalDays >= 1
+            ? $"{(int)t.TotalDays}d {t.Hours}h"
+            : t.TotalHours >= 1
+                ? $"{(int)t.TotalHours}h {t.Minutes}m"
+                : $"{t.Minutes}m {t.Seconds}s";
+    }
+
+    private static string StripScheme(string endpoint)
+    {
+        if (string.IsNullOrEmpty(endpoint)) return endpoint;
+        var idx = endpoint.IndexOf("://", StringComparison.Ordinal);
+        return idx < 0 ? endpoint : endpoint[(idx + 3)..].TrimEnd('/');
+    }
+
+    public void Dispose()
+    {
+        Feed.Updated -= OnFeedUpdated;
+    }
+}

@@ -1,0 +1,760 @@
+/* ==========================================================================
+   Netclaw — Northstar UI · stylesheet
+   --------------------------------------------------------------------------
+   A single self-contained stylesheet for the Netclaw web UI.
+
+   ▸ Default (`:root`) is the LIGHT theme.
+   ▸ Apply `data-theme="carbon"`, `"slate"`, or `"plum"` to <html> (or any
+     ancestor) to switch to one of the three dark palettes.
+   ▸ All colors / radii / sizing live in CSS custom properties at the top —
+     change a token, the whole UI follows.
+
+   Recommended theme: Carbon (pure monochrome black/gray, signal-orange
+   accent). Add `data-theme="carbon"` to <html> in your _Host.cshtml /
+   App.razor entrypoint, or wire it to a user preference.
+
+   This file expects Google Fonts to be loaded already, or you can swap
+   --font-sans / --font-mono for your own families.
+   ========================================================================== */
+
+/* ─── 1. Tokens — LIGHT (default) ───────────────────────────────────────── */
+:root {
+  /* surfaces */
+  --nc-bg:           #faf8f3;
+  --nc-bg-subtle:    #f3f0e9;
+  --nc-panel:        #ffffff;
+  --nc-border:       #e6e1d6;
+  --nc-border-sub:   #efeae0;
+  /* text */
+  --nc-fg:           #1c1a17;
+  --nc-fg-muted:     #6c6862;
+  --nc-fg-dim:       #8e8a82;
+  /* accent — interactive / brand emphasis only, NOT for status */
+  --nc-accent:       #b45309;
+  --nc-accent-soft:  #fdf3e3;
+  --nc-accent-border:#f1d9b3;
+  /* status — healthy */
+  --nc-good:         #2f7a3a;
+  --nc-good-soft:    #e8f2ea;
+  --nc-good-border:  #c0dcc6;
+  /* status — warn */
+  --nc-warn:         #a16207;
+  --nc-warn-soft:    #fbf3dd;
+  --nc-warn-border:  #f0d893;
+  --nc-warn-fg:      #7c4a07;
+  --nc-warn-fg-sub:  #8a5a14;
+  /* status — bad */
+  --nc-bad:          #a3271e;
+  --nc-bad-soft:     #fbe9e6;
+  --nc-bad-border:   #e8c5bf;
+  /* type */
+  --nc-font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --nc-font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* spacing rhythm */
+  --nc-radius:       6px;
+  --nc-radius-sm:    4px;
+  --nc-radius-pill:  999px;
+  /* modal scrim — themed so it works on light + each dark theme */
+  --nc-scrim:        rgba(28,26,23,0.32);
+}
+
+/* ─── 2. Dark theme — CARBON (recommended) ──────────────────────────────── */
+[data-theme="carbon"] {
+  --nc-bg:           #0a0a0a;
+  --nc-bg-subtle:    #131313;
+  --nc-panel:        #181818;
+  --nc-border:       #272727;
+  --nc-border-sub:   #1f1f1f;
+  --nc-fg:           #ededed;
+  --nc-fg-muted:     #9c9c9c;
+  --nc-fg-dim:       #5c5c5c;
+  --nc-accent:       #ff8a4c;
+  --nc-accent-soft:  rgba(255,138,76,0.14);
+  --nc-accent-border:rgba(255,138,76,0.40);
+  --nc-good:         #3fcf8e;
+  --nc-good-soft:    rgba(63,207,142,0.13);
+  --nc-good-border:  rgba(63,207,142,0.40);
+  --nc-warn:         #facc15;
+  --nc-warn-soft:    rgba(250,204,21,0.13);
+  --nc-warn-border:  rgba(250,204,21,0.40);
+  --nc-warn-fg:      #facc15;
+  --nc-warn-fg-sub:  #d4ab0d;
+  --nc-bad:          #ef4444;
+  --nc-bad-soft:     rgba(239,68,68,0.14);
+  --nc-bad-border:   rgba(239,68,68,0.40);
+  --nc-scrim:        rgba(0,0,0,0.55);
+}
+
+/* ─── 2b. Dark theme — SLATE ────────────────────────────────────────────── */
+[data-theme="slate"] {
+  --nc-bg:           #0f1115;
+  --nc-bg-subtle:    #161922;
+  --nc-panel:        #1a1d26;
+  --nc-border:       #262a35;
+  --nc-border-sub:   #21242d;
+  --nc-fg:           #e8eaed;
+  --nc-fg-muted:     #9aa0ac;
+  --nc-fg-dim:       #5e6473;
+  --nc-accent:       #6e9bff;
+  --nc-accent-soft:  rgba(110,155,255,0.14);
+  --nc-accent-border:rgba(110,155,255,0.40);
+  --nc-good:         #4ade80;
+  --nc-good-soft:    rgba(74,222,128,0.13);
+  --nc-good-border:  rgba(74,222,128,0.40);
+  --nc-warn:         #fbbf24;
+  --nc-warn-soft:    rgba(251,191,36,0.13);
+  --nc-warn-border:  rgba(251,191,36,0.40);
+  --nc-warn-fg:      #fbbf24;
+  --nc-warn-fg-sub:  #d4a31c;
+  --nc-bad:          #f87171;
+  --nc-bad-soft:     rgba(248,113,113,0.14);
+  --nc-bad-border:   rgba(248,113,113,0.40);
+  --nc-scrim:        rgba(0,0,0,0.55);
+}
+
+/* ─── 2c. Dark theme — PLUM ─────────────────────────────────────────────── */
+[data-theme="plum"] {
+  --nc-bg:           #15101a;
+  --nc-bg-subtle:    #1d1727;
+  --nc-panel:        #221b30;
+  --nc-border:       #332843;
+  --nc-border-sub:   #281f36;
+  --nc-fg:           #ecdfff;
+  --nc-fg-muted:     #a394b8;
+  --nc-fg-dim:       #685b7a;
+  --nc-accent:       #ff9c8f;
+  --nc-accent-soft:  rgba(255,156,143,0.14);
+  --nc-accent-border:rgba(255,156,143,0.42);
+  --nc-good:         #87d99c;
+  --nc-good-soft:    rgba(135,217,156,0.13);
+  --nc-good-border:  rgba(135,217,156,0.40);
+  --nc-warn:         #ffc266;
+  --nc-warn-soft:    rgba(255,194,102,0.13);
+  --nc-warn-border:  rgba(255,194,102,0.40);
+  --nc-warn-fg:      #ffc266;
+  --nc-warn-fg-sub:  #d4a04e;
+  --nc-bad:          #ff7d8a;
+  --nc-bad-soft:     rgba(255,125,138,0.14);
+  --nc-bad-border:   rgba(255,125,138,0.40);
+  --nc-scrim:        rgba(0,0,0,0.55);
+}
+
+/* ─── 3. Base ───────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--nc-font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--nc-fg);
+  background: var(--nc-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+code, pre, .nc-mono { font-family: var(--nc-font-mono); }
+a { color: var(--nc-accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+button { font: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--nc-accent); outline-offset: 2px; border-radius: var(--nc-radius-sm); }
+
+/* ─── 4. App shell ──────────────────────────────────────────────────────── */
+/* Two-column layout: 232px sidebar + flex main. */
+.nc-app {
+  display: flex;
+  min-height: 100vh;
+}
+.nc-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* ─── 5. Sidebar ────────────────────────────────────────────────────────── */
+.nc-sidebar {
+  width: 232px;
+  flex: 0 0 232px;
+  background: var(--nc-bg-subtle);
+  border-right: 1px solid var(--nc-border);
+  display: flex;
+  flex-direction: column;
+}
+.nc-brand {
+  padding: 20px 20px 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.nc-brand__mark {
+  width: 26px; height: 26px;
+  background: var(--nc-fg);
+  color: var(--nc-bg);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--nc-font-mono);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: -0.5px;
+}
+.nc-brand__name { font-weight: 600; letter-spacing: -0.3px; font-size: 15px; }
+.nc-brand__ver {
+  margin-left: auto;
+  font-family: var(--nc-font-mono);
+  font-size: 10.5px;
+  color: var(--nc-fg-dim);
+  padding: 2px 6px;
+  border: 1px solid var(--nc-border);
+  border-radius: 3px;
+}
+
+.nc-nav-group {
+  padding: 4px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.nc-nav-head {
+  padding: 12px 8px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--nc-fg-dim);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.nc-nav-item {
+  padding: 6px 10px;
+  border-radius: var(--nc-radius-sm);
+  color: var(--nc-fg);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  cursor: pointer;
+  text-decoration: none;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  width: 100%;
+}
+.nc-nav-item:hover { background: rgba(0,0,0,0.04); }
+[data-theme] .nc-nav-item:hover { background: rgba(255,255,255,0.04); }
+.nc-nav-item--active {
+  background: var(--nc-panel);
+  font-weight: 500;
+  box-shadow: inset 0 0 0 1px var(--nc-border);
+}
+.nc-nav-item--muted { color: var(--nc-fg-muted); }
+.nc-nav-item__label { flex: 1; }
+.nc-nav-item__badge {
+  font-family: var(--nc-font-mono);
+  font-size: 11px;
+  color: var(--nc-fg-dim);
+}
+.nc-nav-item__icon {
+  width: 14px; height: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--nc-fg-muted);
+  flex-shrink: 0;
+}
+.nc-nav-item--active .nc-nav-item__icon { color: var(--nc-fg); }
+.nc-nav-dot { width: 6px; height: 6px; border-radius: 3px; flex-shrink: 0; }
+.nc-nav-dot--good    { background: var(--nc-good); }
+.nc-nav-dot--warn    { background: var(--nc-warn); }
+.nc-nav-dot--bad     { background: var(--nc-bad); }
+.nc-nav-dot--neutral { background: var(--nc-fg-dim); }
+
+.nc-sidebar-foot {
+  margin-top: auto;
+  padding: 12px 20px 18px;
+  border-top: 1px solid var(--nc-border);
+  font-size: 12px;
+  color: var(--nc-fg-muted);
+  line-height: 1.5;
+}
+.nc-sidebar-foot__row { display: flex; align-items: center; gap: 6px; }
+.nc-sidebar-foot__endpoint {
+  font-family: var(--nc-font-mono);
+  font-size: 11px;
+  color: var(--nc-fg-dim);
+  margin-top: 2px;
+}
+
+/* ─── 6. Top bar (breadcrumb + endpoint) ────────────────────────────────── */
+.nc-topbar {
+  height: 52px;
+  border-bottom: 1px solid var(--nc-border);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  gap: 16px;
+  background: var(--nc-bg);
+}
+.nc-crumb { color: var(--nc-fg-muted); font-size: 13px; }
+.nc-crumb__sep { color: var(--nc-fg-dim); margin: 0 8px; }
+.nc-crumb--active { color: var(--nc-fg); font-weight: 500; }
+.nc-endpoint {
+  margin-left: auto;
+  font-family: var(--nc-font-mono);
+  font-size: 12px;
+  color: var(--nc-fg-muted);
+  display: flex; align-items: center; gap: 8px;
+}
+.nc-endpoint__sep { color: var(--nc-fg-dim); }
+
+/* ─── 7. Page body ──────────────────────────────────────────────────────── */
+.nc-page {
+  flex: 1;
+  padding: 24px 28px;
+  position: relative; /* anchor for modal overlays */
+}
+.nc-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  gap: 16px;
+}
+.nc-h1 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+  margin: 0;
+}
+.nc-h2 {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+  margin: 0;
+}
+.nc-sub {
+  color: var(--nc-fg-muted);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+/* ─── 8. Card ───────────────────────────────────────────────────────────── */
+.nc-card {
+  background: var(--nc-panel);
+  border: 1px solid var(--nc-border);
+  border-radius: var(--nc-radius);
+}
+.nc-card__head {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--nc-border-sub);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.nc-card__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--nc-fg);
+  letter-spacing: -0.1px;
+}
+.nc-card__head-meta {
+  font-family: var(--nc-font-mono);
+  font-size: 11px;
+  color: var(--nc-fg-dim);
+}
+.nc-card__body { padding: 14px 16px; }
+
+/* Card variant — hero (KPI tile) */
+.nc-card--kpi { padding: 14px 16px; }
+.nc-kpi__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--nc-fg-muted);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.nc-kpi__value {
+  font-size: 20px;
+  font-weight: 600;
+  margin-top: 6px;
+  letter-spacing: -0.3px;
+}
+.nc-kpi__value--mono { font-family: var(--nc-font-mono); letter-spacing: -0.6px; font-size: 22px; }
+.nc-kpi__sub { color: var(--nc-fg-muted); font-size: 12.5px; margin-top: 4px; }
+
+/* Status-themed hero card — when overall is healthy/degraded/stopped */
+.nc-card--status-good { background: var(--nc-good-soft); border-color: var(--nc-good-border); }
+.nc-card--status-warn { background: var(--nc-warn-soft); border-color: var(--nc-warn-border); }
+.nc-card--status-bad  { background: var(--nc-bad-soft);  border-color: var(--nc-bad-border); }
+.nc-card--status-good .nc-kpi__label { color: var(--nc-good); }
+.nc-card--status-warn .nc-kpi__label { color: var(--nc-warn); }
+.nc-card--status-bad  .nc-kpi__label { color: var(--nc-bad); }
+
+/* ─── 9. Pill (status pill) ─────────────────────────────────────────────── */
+.nc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: var(--nc-radius-pill);
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--nc-bg-subtle);
+  color: var(--nc-fg-muted);
+}
+.nc-pill::before {
+  content: "";
+  width: 6px; height: 6px; border-radius: 3px;
+  background: currentColor;
+}
+.nc-pill--good    { background: var(--nc-good-soft);   color: var(--nc-good); }
+.nc-pill--warn    { background: var(--nc-warn-soft);   color: var(--nc-warn); }
+.nc-pill--bad     { background: var(--nc-bad-soft);    color: var(--nc-bad); }
+.nc-pill--accent  { background: var(--nc-accent-soft); color: var(--nc-accent); }
+.nc-pill--neutral { background: var(--nc-bg-subtle);   color: var(--nc-fg-muted); }
+
+/* ─── 10. Buttons ───────────────────────────────────────────────────────── */
+.nc-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--nc-border);
+  border-radius: 5px;
+  background: var(--nc-panel);
+  color: var(--nc-fg);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: border-color .12s, background .12s, color .12s;
+}
+.nc-btn:hover:not([disabled]) { border-color: var(--nc-fg-muted); }
+.nc-btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+.nc-btn--primary {
+  background: var(--nc-fg);
+  color: var(--nc-bg);
+  border-color: var(--nc-fg);
+}
+.nc-btn--primary:hover:not([disabled]) { opacity: 0.9; border-color: var(--nc-fg); }
+
+.nc-btn--accent {
+  background: var(--nc-accent);
+  color: #fff;
+  border-color: var(--nc-accent);
+}
+.nc-btn--accent:hover:not([disabled]) { opacity: 0.9; border-color: var(--nc-accent); }
+
+.nc-btn--danger {
+  color: var(--nc-bad);
+  border-color: var(--nc-bad-border);
+}
+.nc-btn--danger:hover:not([disabled]) { border-color: var(--nc-bad); }
+
+.nc-btn--block { width: 100%; justify-content: center; padding: 10px; font-size: 13.5px; }
+
+/* ─── 11. Key/value list ────────────────────────────────────────────────── */
+.nc-kv {
+  display: grid;
+  grid-template-columns: minmax(0, 110px) 1fr;
+  row-gap: 8px;
+  column-gap: 16px;
+  font-size: 13px;
+  margin: 0;
+}
+.nc-kv dt, .nc-kv__key { color: var(--nc-fg-muted); margin: 0; }
+.nc-kv dd, .nc-kv__val { color: var(--nc-fg); margin: 0; }
+.nc-kv__val--mono { font-family: var(--nc-font-mono); font-size: 12.5px; }
+.nc-kv__val--dim  { color: var(--nc-fg-dim); }
+
+/* ─── 12. Banner ────────────────────────────────────────────────────────── */
+.nc-banner {
+  border: 1px solid var(--nc-border);
+  border-radius: var(--nc-radius);
+  padding: 11px 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  background: var(--nc-panel);
+}
+.nc-banner__title { font-weight: 500; color: var(--nc-fg); }
+.nc-banner__detail { color: var(--nc-fg-muted); margin-top: 2px; font-size: 12.5px; }
+.nc-banner__icon { flex-shrink: 0; margin-top: 1px; }
+
+.nc-banner--warn  { background: var(--nc-warn-soft); border-color: var(--nc-warn-border); color: var(--nc-warn); }
+.nc-banner--warn  .nc-banner__title  { color: var(--nc-warn-fg); }
+.nc-banner--warn  .nc-banner__detail { color: var(--nc-warn-fg-sub); }
+.nc-banner--good  { background: var(--nc-good-soft); border-color: var(--nc-good-border); color: var(--nc-good); }
+.nc-banner--bad   { background: var(--nc-bad-soft);  border-color: var(--nc-bad-border);  color: var(--nc-bad); }
+
+/* ─── 13. Tabs (horizontal underline tabs) ──────────────────────────────── */
+.nc-tabs {
+  display: flex;
+  gap: 22px;
+  border-bottom: 1px solid var(--nc-border);
+  margin-bottom: 16px;
+}
+.nc-tab {
+  padding: 0 0 10px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--nc-fg-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  background: transparent;
+  border-top: 0; border-left: 0; border-right: 0;
+  font-family: inherit;
+}
+.nc-tab--active {
+  color: var(--nc-fg);
+  font-weight: 600;
+  border-bottom-color: var(--nc-accent);
+}
+
+/* ─── 14. Inputs ────────────────────────────────────────────────────────── */
+.nc-input,
+.nc-select,
+.nc-textarea {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--nc-border);
+  border-radius: var(--nc-radius);
+  background: var(--nc-panel);
+  color: var(--nc-fg);
+  font-size: 13.5px;
+  font-family: inherit;
+}
+.nc-input:focus,
+.nc-select:focus,
+.nc-textarea:focus { outline: none; border-color: var(--nc-accent); }
+.nc-textarea { font-family: var(--nc-font-mono); resize: vertical; min-height: 80px; }
+
+/* Search input with leading icon (use <div class="nc-search"><svg/></div><input/>) */
+.nc-search { position: relative; flex: 1; }
+.nc-search__icon {
+  position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+  color: var(--nc-fg-dim);
+  width: 14px; height: 14px;
+}
+.nc-search .nc-input { padding-left: 34px; }
+
+/* Segmented control (button-row filter) */
+.nc-seg {
+  display: inline-flex;
+  border: 1px solid var(--nc-border);
+  border-radius: var(--nc-radius);
+  overflow: hidden;
+  background: var(--nc-panel);
+}
+.nc-seg__item {
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--nc-fg-muted);
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--nc-border);
+  cursor: pointer;
+  font-family: inherit;
+}
+.nc-seg__item:last-child { border-right: 0; }
+.nc-seg__item--active { color: var(--nc-fg); background: var(--nc-bg-subtle); }
+
+/* ─── 15. Modal ─────────────────────────────────────────────────────────── */
+.nc-modal {
+  position: fixed; inset: 0;
+  background: var(--nc-scrim);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 50;
+}
+.nc-modal__body {
+  background: var(--nc-panel);
+  border: 1px solid var(--nc-border);
+  border-radius: 8px;
+  width: 460px;
+  max-width: 90vw;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.2);
+  overflow: hidden;
+}
+.nc-modal__head { padding: 18px 22px 14px; }
+.nc-modal__title { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+.nc-modal__icon {
+  width: 26px; height: 26px;
+  border-radius: 13px;
+  background: var(--nc-warn-soft);
+  color: var(--nc-warn);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700;
+}
+.nc-modal__body p { margin: 0; color: var(--nc-fg-muted); font-size: 13.5px; line-height: 1.5; }
+.nc-modal__detail {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: var(--nc-bg-subtle);
+  border: 1px solid var(--nc-border);
+  border-radius: var(--nc-radius);
+  font-size: 12.5px;
+  color: var(--nc-fg-muted);
+}
+.nc-modal__foot {
+  padding: 12px 18px;
+  background: var(--nc-bg-subtle);
+  border-top: 1px solid var(--nc-border);
+  display: flex; justify-content: flex-end; gap: 8px;
+}
+
+/* ─── 16. Tables / row-lists ────────────────────────────────────────────── */
+/* For connector list, log rows, etc. — use semantic <table> OR a CSS grid. */
+.nc-row-list { display: flex; flex-direction: column; }
+.nc-row {
+  display: grid;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--nc-border-sub);
+}
+.nc-row:last-child { border-bottom: 0; }
+.nc-row__name { font-weight: 500; }
+.nc-row__sub  { font-family: var(--nc-font-mono); font-size: 11.5px; color: var(--nc-fg-dim); }
+.nc-row__msg  { color: var(--nc-fg-muted); font-size: 13px; }
+
+/* Semantic <table> used for stats / data grids. */
+.nc-table { border-collapse: collapse; font-size: 13px; }
+.nc-table th,
+.nc-table td { padding: 7px 14px; text-align: left; border-bottom: 1px solid var(--nc-border-sub); }
+.nc-table th { font-size: 11px; font-weight: 600; color: var(--nc-fg-dim); text-transform: uppercase; letter-spacing: 0.4px; background: var(--nc-bg-subtle); }
+.nc-table tbody tr:last-child td { border-bottom: 0; }
+.nc-table--compact th,
+.nc-table--compact td { padding: 5px 14px; }
+
+/* Log stream: monospace, tight rows, header bar.
+   Wrap in <div class="nc-logs"> and rows are <div class="nc-log-row">. */
+.nc-logs { font-family: var(--nc-font-mono); font-size: 12.5px; }
+.nc-logs__head,
+.nc-log-row {
+  display: grid;
+  grid-template-columns: 110px 60px 130px 1fr;
+  gap: 14px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--nc-border-sub);
+  align-items: baseline;
+}
+.nc-logs__head {
+  background: var(--nc-bg-subtle);
+  font-size: 11px;
+  color: var(--nc-fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 8px 14px;
+  border-bottom-color: var(--nc-border);
+}
+.nc-log__time   { color: var(--nc-fg-dim); }
+.nc-log__level  { font-weight: 600; }
+.nc-log__level--info  { color: var(--nc-fg-muted); }
+.nc-log__level--debug { color: var(--nc-fg-dim); }
+.nc-log__level--warn  { color: var(--nc-warn); }
+.nc-log__level--error { color: var(--nc-bad); }
+.nc-log__source { color: var(--nc-accent); }
+.nc-log__msg    { color: var(--nc-fg); }
+.nc-log__kv     { color: var(--nc-fg-dim); margin-left: 10px; }
+
+/* ─── 17. Model picker row ──────────────────────────────────────────────── */
+.nc-model-row {
+  border: 1px solid var(--nc-border);
+  border-radius: var(--nc-radius);
+  background: var(--nc-panel);
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  cursor: pointer;
+}
+.nc-model-row--selected {
+  border-color: var(--nc-accent);
+  background: var(--nc-accent-soft);
+}
+.nc-model-radio {
+  width: 14px; height: 14px;
+  border: 2px solid var(--nc-border);
+  border-radius: 7px;
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.nc-model-row--selected .nc-model-radio {
+  border-color: var(--nc-accent);
+  background: var(--nc-accent);
+}
+.nc-model-row--selected .nc-model-radio::after {
+  content: "";
+  width: 4px; height: 4px;
+  background: #fff;
+  border-radius: 2px;
+}
+.nc-model__name { font-size: 14px; font-weight: 600; letter-spacing: -0.2px; }
+.nc-model__id   { font-family: var(--nc-font-mono); font-size: 11.5px; color: var(--nc-fg-dim); margin-top: 2px; }
+.nc-model__caps { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; }
+.nc-cap {
+  font-size: 10.5px;
+  padding: 1px 6px;
+  background: var(--nc-bg-subtle);
+  color: var(--nc-fg-muted);
+  border-radius: 3px;
+  font-family: var(--nc-font-mono);
+}
+.nc-model__ctx   { font-family: var(--nc-font-mono); font-size: 12.5px; font-weight: 500; text-align: right; }
+.nc-model__price { font-family: var(--nc-font-mono); font-size: 11.5px; color: var(--nc-fg-dim); margin-top: 2px; text-align: right; }
+
+.nc-badge-frontier {
+  font-size: 10.5px;
+  padding: 1px 6px;
+  background: var(--nc-fg);
+  color: var(--nc-bg);
+  border-radius: 3px;
+  font-weight: 500;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+/* ─── 18. Page grids (per-screen layouts) ──────────────────────────────── */
+/* Status page */
+.nc-grid-status-hero { display: grid; grid-template-columns: 1.6fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+.nc-grid-status-main { display: grid; grid-template-columns: 1.4fr 1fr;       gap: 12px; margin-bottom: 12px; }
+.nc-grid-status-foot { display: grid; grid-template-columns: 1fr 1fr 1fr;     gap: 12px; }
+
+/* Connector detail */
+.nc-grid-conn-kpis  { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+.nc-grid-conn-main  { display: grid; grid-template-columns: 1.3fr 1fr;       gap: 12px; }
+
+/* Model picker */
+.nc-grid-model { display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; }
+
+/* Provider group divider */
+.nc-group-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 4px 8px;
+  font-size: 11px;
+  color: var(--nc-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 600;
+}
+.nc-group-head__rule { flex: 1; height: 1px; background: var(--nc-border); margin-left: 4px; }
+
+/* Utility */
+.nc-mono { font-family: var(--nc-font-mono); }
+.nc-mono-sm { font-family: var(--nc-font-mono); font-size: 12px; }
+.nc-fg-muted { color: var(--nc-fg-muted); }
+.nc-fg-dim   { color: var(--nc-fg-dim); }
+.nc-fg-accent { color: var(--nc-accent); }
+.nc-fg-good  { color: var(--nc-good); }
+.nc-fg-warn  { color: var(--nc-warn); }
+.nc-fg-bad   { color: var(--nc-bad); }
+
+/* tabular numbers for KPI / counters / log timestamps */
+.nc-num { font-variant-numeric: tabular-nums; }
+
+/* ─── 19. Reduce-motion / print ─────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+@media print {
+  .nc-sidebar, .nc-modal { display: none; }
+  .nc-page { padding: 0; }
+}

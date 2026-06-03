@@ -1,0 +1,347 @@
+@page "/approvals"
+@using Netclaw.Configuration
+@using Netclaw.Web.Services
+@rendermode RenderMode.InteractiveServer
+@inject ToolApprovalReader Reader
+@inject ToolApprovalWriter Writer
+@inject TimeProvider Clock
+
+<div class="nc-page-head">
+    <div>
+        <h1 class="nc-h1">Approvals</h1>
+        <p class="nc-sub">
+            Persistent tool approval grants ·
+            <code class="nc-mono">@Reader.ApprovalsPath</code>
+        </p>
+    </div>
+</div>
+
+@if (_result is null)
+{
+    <section class="nc-card"><div class="nc-card__body"><em>Loading…</em></div></section>
+}
+else if (_result.State == ToolApprovalReadState.Missing)
+{
+    <div class="nc-banner nc-banner--info">
+        <div>
+            <div class="nc-banner__title">No approval rules yet</div>
+            <div class="nc-banner__detail">
+                Approval grants are created in-session: when the agent needs to run
+                a tool that requires confirmation, you can trust specific verbs or
+                patterns for future sessions. Use <code class="nc-mono">netclaw approvals list</code>
+                to inspect the file after granting trust in-session.
+            </div>
+        </div>
+    </div>
+}
+else if (_result.State == ToolApprovalReadState.ParseError)
+{
+    <div class="nc-banner nc-banner--bad">
+        <div>
+            <div class="nc-banner__title">Could not read approvals file</div>
+            <div class="nc-banner__detail">
+                @_result.ErrorDetail
+                <br />
+                Path: <code class="nc-mono">@_result.Path</code>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(_actionError))
+    {
+        <div class="nc-banner nc-banner--bad" style="margin-bottom:16px;">
+            <div>
+                <div class="nc-banner__title">Action failed</div>
+                <div class="nc-banner__detail">@_actionError</div>
+            </div>
+        </div>
+    }
+
+    @foreach (var warning in _result.Warnings)
+    {
+        <div class="nc-banner nc-banner--warn" style="margin-bottom:16px;">
+            <div>
+                <div class="nc-banner__title">Quarantine notice</div>
+                <div class="nc-banner__detail">@warning</div>
+            </div>
+        </div>
+    }
+
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
+        <div class="nc-seg">
+            @foreach (var audience in TrustAudiences.All)
+            {
+                var isActive = _activeAudience == audience;
+                var audienceCount = CountAudienceRules(_result.Snapshot!, audience);
+                <button class="nc-seg__item @(isActive ? "nc-seg__item--active" : "")"
+                        @onclick="() => SelectAudience(audience)">
+                    @CapitalizeName(audience) @if (audienceCount > 0) { <span>(@audienceCount)</span> }
+                </button>
+            }
+        </div>
+        <span style="font-size:12.5px; color:var(--nc-fg-muted);">
+            @CountTotalRules(_result.Snapshot!) @(CountTotalRules(_result.Snapshot!) == 1 ? "rule" : "rules") total
+        </span>
+    </div>
+
+    <section class="nc-card">
+        <header class="nc-card__head">
+            <h2 class="nc-h2">@CapitalizeName(_activeAudience)</h2>
+            <span class="nc-card__head-meta">@CountAudienceRules(_result.Snapshot!, _activeAudience) @(CountAudienceRules(_result.Snapshot!, _activeAudience) == 1 ? "rule" : "rules")</span>
+            @if (CountAudienceRules(_result.Snapshot!, _activeAudience) > 0)
+            {
+                @if (_pendingRevoke?.Kind == PendingRevokeKind.AudienceAll
+                    && _pendingRevoke.Audience == _activeAudience)
+                {
+                    <span style="display:inline-flex; align-items:center; gap:8px; margin-left:auto;">
+                        <span style="font-size:12.5px; color:var(--nc-bad);">
+                            Revoke all @CapitalizeName(_activeAudience) rules? This cannot be undone.
+                        </span>
+                        <button class="nc-btn nc-btn--danger" @onclick="ConfirmRevokeAudience">Yes, revoke all</button>
+                        <button class="nc-btn" @onclick="ClearPending">Cancel</button>
+                    </span>
+                }
+                else
+                {
+                    <button class="nc-btn nc-btn--danger" style="margin-left:auto;"
+                            @onclick="() => RequestRevokeAudience(_activeAudience)">
+                        Revoke all @CapitalizeName(_activeAudience)
+                    </button>
+                }
+            }
+        </header>
+
+        @if (GetActiveTools() is not { } activeTools || activeTools.Count == 0)
+        {
+            <div class="nc-card__body" style="color:var(--nc-fg-muted); font-size:13px;">
+                No approval rules for @CapitalizeName(_activeAudience) audience.
+            </div>
+        }
+        else
+        {
+            @foreach (var (toolName, entries) in activeTools.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+            {
+                if (entries.Count == 0) continue;
+
+                <div>
+                    <div class="nc-group-head" style="margin: 0 16px; padding-top:12px;">
+                        <span style="font-weight:600; font-size:12.5px;">@toolName</span>
+                        <span class="nc-group-head__rule"></span>
+                        @if (_pendingRevoke?.Kind == PendingRevokeKind.ToolAll
+                            && _pendingRevoke.Audience == _activeAudience
+                            && _pendingRevoke.Tool == toolName)
+                        {
+                            <span style="display:inline-flex; align-items:center; gap:6px;">
+                                <span style="font-size:12px; color:var(--nc-bad);">Revoke all @toolName rules?</span>
+                                <button class="nc-btn nc-btn--danger" style="font-size:12px; padding:3px 8px;"
+                                        @onclick="ConfirmRevokeTool">Yes</button>
+                                <button class="nc-btn" style="font-size:12px; padding:3px 8px;"
+                                        @onclick="ClearPending">Cancel</button>
+                            </span>
+                        }
+                        else
+                        {
+                            <button class="nc-btn nc-btn--danger" style="font-size:11.5px; padding:2px 7px;"
+                                    @onclick="() => RequestRevokeTool(_activeAudience, toolName)">
+                                Revoke all
+                            </button>
+                        }
+                    </div>
+
+                    <table class="nc-table" style="width:100%; margin-bottom:0;">
+                        <thead>
+                            <tr>
+                                <th>Scope</th>
+                                <th>Added</th>
+                                <th style="width:1%;"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var entry in entries.OrderBy(e => e.Verb, StringComparer.Ordinal)
+                                                          .ThenBy(e => e.Directory ?? string.Empty, StringComparer.Ordinal))
+                            {
+                                var isConfirming = _pendingRevoke?.Kind == PendingRevokeKind.SingleEntry
+                                    && _pendingRevoke.Audience == _activeAudience
+                                    && _pendingRevoke.Tool == toolName
+                                    && _pendingRevoke.Entry == entry;
+
+                                <tr>
+                                    <td>
+                                        <code class="nc-mono">@entry.FormatScope()</code>
+                                    </td>
+                                    <td style="color:var(--nc-fg-muted); white-space:nowrap;">
+                                        @FormatAdded(entry.CreatedAt)
+                                    </td>
+                                    <td style="white-space:nowrap;">
+                                        @if (isConfirming)
+                                        {
+                                            <span style="display:inline-flex; align-items:center; gap:6px;">
+                                                <span style="font-size:12px; color:var(--nc-bad);">Revoke?</span>
+                                                <button class="nc-btn nc-btn--danger" style="font-size:12px; padding:3px 8px;"
+                                                        @onclick="ConfirmRevokeEntry">Yes</button>
+                                                <button class="nc-btn" style="font-size:12px; padding:3px 8px;"
+                                                        @onclick="ClearPending">No</button>
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <button class="nc-btn nc-btn--danger" style="font-size:12px; padding:3px 8px;"
+                                                    @onclick="() => RequestRevokeEntry(_activeAudience, toolName, entry)">
+                                                Revoke
+                                            </button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        }
+    </section>
+}
+
+@code {
+    private ToolApprovalReadResult? _result;
+    private TrustAudience _activeAudience = TrustAudience.Personal;
+    private string? _actionError;
+    private PendingRevoke? _pendingRevoke;
+
+    private enum PendingRevokeKind { AudienceAll, ToolAll, SingleEntry }
+
+    private sealed record PendingRevoke(
+        PendingRevokeKind Kind,
+        TrustAudience Audience,
+        string? Tool = null,
+        ApprovalEntry? Entry = null);
+
+    protected override Task OnInitializedAsync()
+    {
+        Reload();
+        return Task.CompletedTask;
+    }
+
+    private void Reload()
+    {
+        _result = Reader.Read();
+    }
+
+    private void SelectAudience(TrustAudience audience)
+    {
+        _activeAudience = audience;
+        ClearPending();
+    }
+
+    private void RequestRevokeAudience(TrustAudience audience)
+    {
+        _actionError = null;
+        _pendingRevoke = new PendingRevoke(PendingRevokeKind.AudienceAll, audience);
+    }
+
+    private void RequestRevokeTool(TrustAudience audience, string tool)
+    {
+        _actionError = null;
+        _pendingRevoke = new PendingRevoke(PendingRevokeKind.ToolAll, audience, tool);
+    }
+
+    private void RequestRevokeEntry(TrustAudience audience, string tool, ApprovalEntry entry)
+    {
+        _actionError = null;
+        _pendingRevoke = new PendingRevoke(PendingRevokeKind.SingleEntry, audience, tool, entry);
+    }
+
+    private void ClearPending()
+    {
+        _pendingRevoke = null;
+    }
+
+    private void ConfirmRevokeAudience()
+    {
+        if (_pendingRevoke?.Kind != PendingRevokeKind.AudienceAll) return;
+        var audience = _pendingRevoke.Audience;
+        ClearPending();
+
+        var result = Writer.RevokeAllForAudience(audience);
+        if (result.IsError)
+            _actionError = result.ErrorDetail;
+        Reload();
+    }
+
+    private void ConfirmRevokeTool()
+    {
+        if (_pendingRevoke?.Kind != PendingRevokeKind.ToolAll || _pendingRevoke.Tool is null) return;
+        var audience = _pendingRevoke.Audience;
+        var tool = _pendingRevoke.Tool;
+        ClearPending();
+
+        var result = Writer.RevokeAllForTool(audience, tool);
+        if (result.IsError)
+            _actionError = result.ErrorDetail;
+        Reload();
+    }
+
+    private void ConfirmRevokeEntry()
+    {
+        if (_pendingRevoke?.Kind != PendingRevokeKind.SingleEntry
+            || _pendingRevoke.Tool is null
+            || _pendingRevoke.Entry is null) return;
+        var audience = _pendingRevoke.Audience;
+        var tool = _pendingRevoke.Tool;
+        var entry = _pendingRevoke.Entry;
+        ClearPending();
+
+        var result = Writer.RevokeEntry(audience, tool, entry);
+        if (result.IsError)
+            _actionError = result.ErrorDetail;
+        Reload();
+    }
+
+    private IReadOnlyDictionary<string, IReadOnlyList<ApprovalEntry>>? GetActiveTools()
+    {
+        if (_result?.Snapshot is not { } snapshot) return null;
+        var key = _activeAudience.ToWireValue();
+        return snapshot.TryGetValue(key, out var tools) ? tools : null;
+    }
+
+    private static int CountTotalRules(
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<ApprovalEntry>>> snapshot)
+    {
+        var total = 0;
+        foreach (var (_, tools) in snapshot)
+            foreach (var (_, entries) in tools)
+                total += entries.Count;
+        return total;
+    }
+
+    private static int CountAudienceRules(
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, IReadOnlyList<ApprovalEntry>>> snapshot,
+        TrustAudience audience)
+    {
+        var key = audience.ToWireValue();
+        if (!snapshot.TryGetValue(key, out var tools)) return 0;
+        return tools.Values.Sum(e => e.Count);
+    }
+
+    private static string CapitalizeName(TrustAudience audience)
+    {
+        var wire = audience.ToWireValue();
+        return wire.Length == 0 ? wire : char.ToUpperInvariant(wire[0]) + wire[1..];
+    }
+
+    private string FormatAdded(DateTimeOffset? createdAt)
+    {
+        if (createdAt is not { } ts) return "—";
+        var elapsed = Clock.GetUtcNow() - ts;
+        if (elapsed < TimeSpan.FromMinutes(1)) return "just now";
+        if (elapsed < TimeSpan.FromHours(1)) return RelativePlural((int)elapsed.TotalMinutes, "minute");
+        if (elapsed < TimeSpan.FromDays(1)) return RelativePlural((int)elapsed.TotalHours, "hour");
+        if (elapsed < TimeSpan.FromDays(30)) return RelativePlural((int)elapsed.TotalDays, "day");
+        if (elapsed < TimeSpan.FromDays(365)) return RelativePlural((int)(elapsed.TotalDays / 30), "month");
+        return RelativePlural((int)(elapsed.TotalDays / 365), "year");
+    }
+
+    private static string RelativePlural(int count, string unit)
+        => count <= 1 ? $"1 {unit} ago" : $"{count} {unit}s ago";
+}

@@ -1,0 +1,24 @@
+@inherits LayoutComponentBase
+
+<div class="nc-app">
+    <SidebarNav />
+    <div class="nc-main">
+        <Topbar Crumbs="@_crumbs" />
+        <main class="nc-page">
+            <CascadingValue Value="@SetCrumbs" Name="SetCrumbs">
+                @Body
+            </CascadingValue>
+        </main>
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<string>? _crumbs;
+
+    private void SetCrumbs(IReadOnlyList<string>? crumbs)
+    {
+        if (Equals(_crumbs, crumbs)) return;
+        _crumbs = crumbs;
+        InvokeAsync(StateHasChanged);
+    }
+}

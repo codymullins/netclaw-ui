@@ -1,0 +1,235 @@
+@using Microsoft.AspNetCore.Components.Forms
+@inject DaemonClientService Client
+
+@if (_loadResult is null)
+{
+    <section class="nc-card"><div class="nc-card__body"><em>Loading…</em></div></section>
+}
+else if (_loadResult.State == DaemonApiResultState.Unauthorized)
+{
+    <div class="nc-banner nc-banner--warn">
+        <div>
+            <div class="nc-banner__title">Unauthorized</div>
+            <div class="nc-banner__detail">Pair this host with the daemon to obtain a device token.</div>
+        </div>
+    </div>
+}
+else if (_loadResult.State == DaemonApiResultState.Unreachable)
+{
+    <div class="nc-banner nc-banner--bad">
+        <div>
+            <div class="nc-banner__title">Daemon unreachable</div>
+            <div class="nc-banner__detail">@(_loadResult.ErrorDetail ?? "Endpoint did not respond.")</div>
+        </div>
+    </div>
+}
+else if (_form is not null)
+{
+    @if (_lastPut is not null)
+    {
+        <div class="nc-banner nc-banner--warn" style="margin-bottom:16px;">
+            <div>
+                <div class="nc-banner__title">Saved · restart required</div>
+                <div class="nc-banner__detail">
+                    Discord options are bound once at daemon startup. Restart
+                    <code>netclawd</code> for the new configuration to take effect.
+                </div>
+                <div class="nc-banner__detail nc-mono-sm">
+                    Wrote <code>@_lastPut.ConfigPath</code>@(_tokenTouched ? " and " : string.Empty)@if (_tokenTouched) { <code>@_lastPut.SecretsPath</code> }
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(_putError))
+    {
+        <div class="nc-banner nc-banner--bad" style="margin-bottom:16px;">
+            <div>
+                <div class="nc-banner__title">Save failed</div>
+                <div class="nc-banner__detail">@_putError</div>
+            </div>
+        </div>
+    }
+
+    <EditForm Model="_form" OnValidSubmit="OnSubmitAsync" FormName="discord-config">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+            <section class="nc-card">
+                <header class="nc-card__head"><h2 class="nc-h2">Connector</h2></header>
+                <div class="nc-card__body nc-form">
+                    <label class="nc-check">
+                        <InputCheckbox @bind-Value="_form.Enabled" />
+                        <span>Enabled</span>
+                    </label>
+                </div>
+            </section>
+
+            <section class="nc-card">
+                <header class="nc-card__head"><h2 class="nc-h2">Bot token</h2></header>
+                <div class="nc-card__body nc-form">
+                    <p class="nc-form__hint">
+                        @(_tokenIsSetOnLoad
+                            ? "A bot token is already set. Leave blank to keep it; type to replace; check Clear to remove."
+                            : "No bot token is currently set.")
+                    </p>
+                    <label class="nc-field">
+                        <span>Replacement token</span>
+                        <InputText class="nc-input" type="password" autocomplete="new-password"
+                                   placeholder="@(_tokenIsSetOnLoad ? "(leave blank to keep current token)" : "(no token set)")"
+                                   @bind-Value="_newToken" />
+                    </label>
+                    <label class="nc-check">
+                        <InputCheckbox @bind-Value="_clearToken" />
+                        <span>Clear stored token</span>
+                    </label>
+                </div>
+            </section>
+        </div>
+
+        <section class="nc-card" style="margin-top:12px;">
+            <header class="nc-card__head"><h2 class="nc-h2">Routing</h2></header>
+            <div class="nc-card__body nc-form">
+                <label class="nc-field">
+                    <span>Default channel id</span>
+                    <InputText class="nc-input" @bind-Value="_form.DefaultChannelId" />
+                </label>
+                <label class="nc-check">
+                    <InputCheckbox @bind-Value="_form.AllowDirectMessages" />
+                    <span>Allow direct messages</span>
+                </label>
+                <label class="nc-check">
+                    <InputCheckbox @bind-Value="_form.MentionOnly" />
+                    <span>Only respond when mentioned (channels)</span>
+                </label>
+                <label class="nc-check">
+                    <InputCheckbox @bind-Value="_form.MentionRequiredInDm" />
+                    <span>Require mention in DMs</span>
+                </label>
+            </div>
+        </section>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px;">
+            <section class="nc-card">
+                <header class="nc-card__head"><h2 class="nc-h2">Allowed channel ids</h2></header>
+                <div class="nc-card__body nc-form">
+                    <p class="nc-form__hint">One per line. Empty to allow all channels.</p>
+                    <InputTextArea class="nc-input nc-input--mono" rows="5" @bind-Value="_allowedChannelIdsText" />
+                </div>
+            </section>
+            <section class="nc-card">
+                <header class="nc-card__head"><h2 class="nc-h2">Allowed user ids</h2></header>
+                <div class="nc-card__body nc-form">
+                    <p class="nc-form__hint">One per line. Empty to allow all users.</p>
+                    <InputTextArea class="nc-input nc-input--mono" rows="5" @bind-Value="_allowedUserIdsText" />
+                </div>
+            </section>
+        </div>
+
+        <section class="nc-card" style="margin-top:12px;">
+            <header class="nc-card__head"><h2 class="nc-h2">Channel audiences</h2></header>
+            <div class="nc-card__body nc-form">
+                <p class="nc-form__hint">
+                    <code>channelId=audience</code> per line. Maps a Discord channel to a named audience used by routing rules.
+                </p>
+                <InputTextArea class="nc-input nc-input--mono" rows="5" @bind-Value="_channelAudiencesText" />
+            </div>
+        </section>
+
+        <div style="margin-top:16px; display:flex; justify-content:flex-end; gap:8px;">
+            <button type="submit" class="nc-btn nc-btn--primary" disabled="@_saving">@(_saving ? "Saving…" : "Save")</button>
+        </div>
+    </EditForm>
+}
+
+@code {
+    private DaemonApiResult<DiscordConfigWire.GetResponse>? _loadResult;
+    private DiscordConfigWire.PutRequest? _form;
+    private DiscordConfigWire.PutResponse? _lastPut;
+    private string? _putError;
+    private bool _saving;
+    private bool _tokenIsSetOnLoad;
+    private bool _tokenTouched;
+    private string _newToken = string.Empty;
+    private bool _clearToken;
+    private string _allowedChannelIdsText = string.Empty;
+    private string _allowedUserIdsText = string.Empty;
+    private string _channelAudiencesText = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadResult = await Client.GetDiscordConfigAsync();
+        if (_loadResult.State == DaemonApiResultState.Ok && _loadResult.Value is { } current)
+        {
+            _tokenIsSetOnLoad = current.BotTokenIsSet;
+            _form = new DiscordConfigWire.PutRequest
+            {
+                Enabled = current.Enabled,
+                DefaultChannelId = current.DefaultChannelId,
+                AllowDirectMessages = current.AllowDirectMessages,
+                MentionOnly = current.MentionOnly,
+                MentionRequiredInDm = current.MentionRequiredInDm,
+                AllowedChannelIds = current.AllowedChannelIds,
+                AllowedUserIds = current.AllowedUserIds,
+                ChannelAudiences = new Dictionary<string, string>(current.ChannelAudiences, StringComparer.Ordinal),
+            };
+            _allowedChannelIdsText = string.Join('\n', current.AllowedChannelIds);
+            _allowedUserIdsText = string.Join('\n', current.AllowedUserIds);
+            _channelAudiencesText = string.Join('\n', current.ChannelAudiences.Select(kvp => $"{kvp.Key}={kvp.Value}"));
+        }
+    }
+
+    private async Task OnSubmitAsync()
+    {
+        if (_form is null) return;
+        _saving = true;
+        _putError = null;
+        _lastPut = null;
+
+        _form.AllowedChannelIds = SplitLines(_allowedChannelIdsText);
+        _form.AllowedUserIds = SplitLines(_allowedUserIdsText);
+        _form.ChannelAudiences = ParseMap(_channelAudiencesText);
+
+        if (_clearToken) { _form.BotToken = string.Empty; _tokenTouched = true; }
+        else if (!string.IsNullOrEmpty(_newToken)) { _form.BotToken = _newToken; _tokenTouched = true; }
+        else { _form.BotToken = null; _tokenTouched = false; }
+
+        var result = await Client.PutDiscordConfigAsync(_form);
+        _saving = false;
+
+        switch (result.State)
+        {
+            case DaemonApiResultState.Ok:
+                _lastPut = result.Value;
+                _tokenIsSetOnLoad = _clearToken ? false : (!string.IsNullOrEmpty(_newToken) || _tokenIsSetOnLoad);
+                _newToken = string.Empty;
+                _clearToken = false;
+                break;
+            case DaemonApiResultState.Unauthorized:
+                _putError = "Unauthorized — pair this host with the daemon to obtain a device token.";
+                break;
+            case DaemonApiResultState.Unreachable:
+                _putError = result.ErrorDetail ?? "Daemon unreachable.";
+                break;
+        }
+    }
+
+    private static string[] SplitLines(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return [];
+        return text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    private static Dictionary<string, string> ParseMap(string text)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var line in SplitLines(text))
+        {
+            var idx = line.IndexOf('=');
+            if (idx <= 0 || idx == line.Length - 1) continue;
+            var key = line[..idx].Trim();
+            var value = line[(idx + 1)..].Trim();
+            if (key.Length == 0 || value.Length == 0) continue;
+            map[key] = value;
+        }
+        return map;
+    }
+}

@@ -1,0 +1,404 @@
+@page "/model"
+@implements IDisposable
+@inject DaemonStatusFeed Feed
+@inject DaemonClientService ModelClient
+
+@{
+    var runtime = _statusResult?.Value?.Model;
+    var activeDisplayName = runtime?.DisplayName ?? runtime?.ModelId
+        ?? _selection?.Main?.ModelId ?? "—";
+}
+
+<div class="nc-page-head">
+    <div>
+        <h1 class="nc-h1">Model</h1>
+        <p class="nc-sub">
+            Active: <strong style="color:var(--nc-fg);">@activeDisplayName</strong> ·
+            requires daemon restart to switch
+        </p>
+    </div>
+</div>
+
+@if (_loadError is not null)
+{
+    <div class="nc-banner nc-banner--bad" style="margin-bottom:14px;">
+        <div>
+            <div class="nc-banner__title">Could not load model data</div>
+            <div class="nc-banner__detail">@_loadError</div>
+        </div>
+    </div>
+}
+
+@if (_saveSuccess)
+{
+    <div class="nc-banner nc-banner--warn" style="margin-bottom:14px;">
+        <svg class="nc-banner__icon" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6">
+            <path d="M7 1.5L13 12H1L7 1.5z"/><path d="M7 6v3M7 10.5v.5"/>
+        </svg>
+        <div>
+            <div class="nc-banner__title">Saved · restart required</div>
+            <div class="nc-banner__detail">
+                Model selection written to <code class="nc-mono">netclaw.json</code>.
+                <a href="/daemon" style="color:var(--nc-accent); text-decoration:underline;">Restart daemon</a> to apply.
+            </div>
+        </div>
+    </div>
+}
+
+@if (_saveError is not null)
+{
+    <div class="nc-banner nc-banner--bad" style="margin-bottom:14px;">
+        <div>
+            <div class="nc-banner__title">Save failed</div>
+            <div class="nc-banner__detail">@_saveError</div>
+        </div>
+    </div>
+}
+
+<div style="display:flex; gap:10px; margin-bottom:14px;">
+    <div class="nc-search">
+        <svg class="nc-search__icon" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="6" cy="6" r="3.5"/><path d="M9 9l3 3"/>
+        </svg>
+        <input class="nc-input" type="search" placeholder="Search models, providers, capabilities…"
+               @bind="_search" @bind:event="oninput" />
+    </div>
+    <div class="nc-seg" role="tablist">
+        @foreach (var role in new[] { "Main", "Fallback", "Compaction" })
+        {
+            <button class="nc-seg__item @(_activeRole == role ? "nc-seg__item--active" : string.Empty)"
+                    @onclick="() => _activeRole = role">@role</button>
+        }
+    </div>
+</div>
+
+<div class="nc-grid-model">
+
+    <div>
+        @if (_catalog is null)
+        {
+            <div style="color:var(--nc-fg-muted); padding:12px 0;">
+                @if (_loadError is null) { <em>Loading catalog…</em> }
+            </div>
+        }
+        else
+        {
+            var filteredModels = FilterModels(_catalog, _search);
+            var groups = filteredModels
+                .GroupBy(m => m.Provider)
+                .OrderBy(g => g.Key);
+
+            @foreach (var group in groups)
+            {
+                var groupList = group.ToList();
+                <div style="margin-bottom:14px;">
+                    <div class="nc-group-head">
+                        <span>@FormatProviderName(group.Key)</span>
+                        <span class="nc-mono nc-fg-dim">@groupList.Count</span>
+                        <span class="nc-group-head__rule"></span>
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:8px;">
+                        @foreach (var model in groupList)
+                        {
+                            var isSelected = IsSelectedForActiveRole(model);
+                            <div class="nc-model-row @(isSelected ? "nc-model-row--selected" : string.Empty)"
+                                 role="radio"
+                                 aria-checked="@(isSelected ? "true" : "false")"
+                                 style="cursor:pointer;"
+                                 @onclick="() => SelectModel(model)">
+                                <div class="nc-model-radio"></div>
+                                <div style="flex:1; min-width:0;">
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <span class="nc-model__name">@model.DisplayName</span>
+                                        @foreach (var badge in model.Badges)
+                                        {
+                                            <span class="nc-badge-frontier">@badge</span>
+                                        }
+                                        @if (isSelected)
+                                        {
+                                            <span class="nc-pill nc-pill--accent">@_activeRole.ToLowerInvariant()</span>
+                                        }
+                                    </div>
+                                    <div class="nc-model__id">@model.ModelId</div>
+                                    <div class="nc-model__caps">
+                                        @foreach (var m in model.InputModalities)
+                                        {
+                                            <span class="nc-cap">@m.ToLowerInvariant()</span>
+                                        }
+                                    </div>
+                                </div>
+                                <div style="text-align:right; flex-shrink:0;">
+                                    @if (model.ContextWindow is { } ctx)
+                                    {
+                                        <div class="nc-model__ctx">@FormatContext(ctx)</div>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (!groups.Any())
+            {
+                <p style="color:var(--nc-fg-muted); padding:8px 0;">No models match your search.</p>
+            }
+        }
+    </div>
+
+    <aside>
+        <section class="nc-card">
+            <header class="nc-card__head">
+                <h2 class="nc-h2">Selected model</h2>
+                @if (_pending is not null)
+                {
+                    <span class="nc-pill nc-pill--accent">pending</span>
+                }
+                else
+                {
+                    <span class="nc-pill">@_activeRole.ToLowerInvariant()</span>
+                }
+            </header>
+            <div class="nc-card__body">
+                @{
+                    var displayEntry = _pending;
+                    var savedRef = GetSavedRefForRole(_activeRole);
+                }
+                @if (displayEntry is not null)
+                {
+                    <div style="font-size:17px; font-weight:600; letter-spacing:-0.3px;">@displayEntry.DisplayName</div>
+                    <div class="nc-mono-sm" style="color:var(--nc-fg-dim);">@displayEntry.ModelId</div>
+                    <hr style="border:0; border-top:1px solid var(--nc-border-sub); margin:12px 0;"/>
+                    <dl class="nc-kv">
+                        <dt>Provider</dt>
+                        <dd>
+                            <input class="nc-input" style="width:100%; font-size:12px; padding:3px 6px;"
+                                   placeholder="provider key (e.g. anthropic)"
+                                   @bind="_pendingProviderKey" @bind:event="oninput" />
+                        </dd>
+                        <dt>Context</dt>
+                        <dd class="nc-kv__val--mono">
+                            @if (displayEntry.ContextWindow is { } ctx)
+                            { @($"{ctx:N0} tokens") }
+                            else { @("—") }
+                        </dd>
+                        <dt>Input</dt>
+                        <dd>@(string.Join(" · ", displayEntry.InputModalities.Select(m => m.ToLowerInvariant())))</dd>
+                        <dt>Output</dt>
+                        <dd>@(string.Join(" · ", displayEntry.OutputModalities.Select(m => m.ToLowerInvariant())))</dd>
+                    </dl>
+                    @if (!string.IsNullOrWhiteSpace(displayEntry.Notes))
+                    {
+                        <p style="font-size:12px; color:var(--nc-fg-dim); margin:8px 0 0;">@displayEntry.Notes</p>
+                    }
+                }
+                else if (savedRef is not null)
+                {
+                    <div style="font-size:17px; font-weight:600; letter-spacing:-0.3px;">@savedRef.ModelId</div>
+                    <div class="nc-mono-sm" style="color:var(--nc-fg-dim);">@savedRef.Provider</div>
+                    <hr style="border:0; border-top:1px solid var(--nc-border-sub); margin:12px 0;"/>
+                    <dl class="nc-kv">
+                        <dt>Provider</dt>
+                        <dd>@savedRef.Provider</dd>
+                        @if (savedRef.ContextWindow is { } ctx)
+                        {
+                            <dt>Context</dt>
+                            <dd class="nc-kv__val--mono">@($"{ctx:N0} tokens")</dd>
+                        }
+                    </dl>
+                }
+                else
+                {
+                    <p style="color:var(--nc-fg-muted); margin:0;">
+                        Select a model from the list to configure the @_activeRole role.
+                    </p>
+                }
+            </div>
+        </section>
+
+        <div class="nc-banner nc-banner--warn" style="margin-top:12px;">
+            <svg class="nc-banner__icon" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6">
+                <path d="M7 1.5L13 12H1L7 1.5z"/><path d="M7 6v3M7 10.5v.5"/>
+            </svg>
+            <div>
+                <div class="nc-banner__title">Switching requires restart</div>
+                <div class="nc-banner__detail">
+                    Model is bound at daemon startup. Save selection, then restart
+                    <code class="nc-mono">netclawd</code>.
+                </div>
+            </div>
+        </div>
+
+        <button class="nc-btn nc-btn--accent nc-btn--block"
+                style="margin-top:12px;"
+                disabled="@(_pending is null || _saving)"
+                @onclick="SaveSelectionAsync">
+            @if (_saving) { <span>Saving…</span> }
+            else { <span>Save selection</span> }
+        </button>
+    </aside>
+</div>
+
+@code {
+    private DaemonApiResult<DaemonRuntimeStatus.Response>? _statusResult;
+    private ModelCatalogWire.GetCatalogResponse? _catalog;
+    private ModelCatalogWire.GetSelectionResponse? _selection;
+
+    private string _activeRole = "Main";
+    private string _search = string.Empty;
+
+    private ModelCatalogWire.ModelEntry? _pending;
+    private string _pendingProviderKey = string.Empty;
+
+    private bool _saving;
+    private bool _saveSuccess;
+    private string? _saveError;
+    private string? _loadError;
+
+    protected override void OnInitialized()
+    {
+        _statusResult = Feed.Current;
+        Feed.Updated += OnFeedUpdated;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loadError = null;
+
+        var catalogTask = ModelClient.GetModelCatalogAsync();
+        var selectionTask = ModelClient.GetModelSelectionAsync();
+
+        var catalogResult = await catalogTask;
+        var selectionResult = await selectionTask;
+
+        if (catalogResult.State == DaemonApiResultState.Ok)
+            _catalog = catalogResult.Value;
+        else
+            _loadError = $"Catalog: {catalogResult.ErrorDetail ?? catalogResult.State.ToString()}";
+
+        if (selectionResult.State == DaemonApiResultState.Ok)
+            _selection = selectionResult.Value;
+        else
+        {
+            var selErr = $"Selection: {selectionResult.ErrorDetail ?? selectionResult.State.ToString()}";
+            _loadError = _loadError is null ? selErr : $"{_loadError}; {selErr}";
+        }
+    }
+
+    private void OnFeedUpdated(DaemonApiResult<DaemonRuntimeStatus.Response> result)
+    {
+        _statusResult = result;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void SelectModel(ModelCatalogWire.ModelEntry model)
+    {
+        _pending = model;
+        _pendingProviderKey = model.Provider;
+        _saveSuccess = false;
+        _saveError = null;
+    }
+
+    private bool IsSelectedForActiveRole(ModelCatalogWire.ModelEntry model)
+    {
+        if (_pending is not null)
+            return _pending.ModelId == model.ModelId && _pending.Provider == model.Provider;
+
+        var saved = GetSavedRefForRole(_activeRole);
+        return saved is not null && saved.ModelId == model.ModelId;
+    }
+
+    private ModelCatalogWire.ModelReferenceWire? GetSavedRefForRole(string role) => role switch
+    {
+        "Main" => _selection?.Main,
+        "Fallback" => _selection?.Fallback,
+        "Compaction" => _selection?.Compaction,
+        _ => null,
+    };
+
+    private async Task SaveSelectionAsync()
+    {
+        if (_pending is null) return;
+
+        _saving = true;
+        _saveSuccess = false;
+        _saveError = null;
+
+        var providerKey = string.IsNullOrWhiteSpace(_pendingProviderKey)
+            ? _pending.Provider
+            : _pendingProviderKey.Trim();
+
+        var reference = new ModelCatalogWire.ModelReferenceWire
+        {
+            Provider = providerKey,
+            ModelId = _pending.ModelId,
+            ContextWindow = _pending.ContextWindow,
+            InputModalities = _pending.InputModalities.Length > 0
+                ? string.Join(", ", _pending.InputModalities)
+                : null,
+            OutputModalities = _pending.OutputModalities.Length > 0
+                ? string.Join(", ", _pending.OutputModalities)
+                : null,
+        };
+
+        var result = await ModelClient.PutModelSelectionAsync(_activeRole, reference);
+
+        _saving = false;
+
+        if (result.State == DaemonApiResultState.Ok)
+        {
+            _saveSuccess = true;
+            _pending = null;
+            // Reload selection to reflect the written state
+            var selectionResult = await ModelClient.GetModelSelectionAsync();
+            if (selectionResult.State == DaemonApiResultState.Ok)
+                _selection = selectionResult.Value;
+        }
+        else
+        {
+            _saveError = result.ErrorDetail ?? "Unknown error saving selection.";
+        }
+    }
+
+    private static IEnumerable<ModelCatalogWire.ModelEntry> FilterModels(
+        ModelCatalogWire.GetCatalogResponse catalog,
+        string search)
+    {
+        if (string.IsNullOrWhiteSpace(search))
+            return catalog.Models;
+
+        var term = search.Trim();
+        return catalog.Models.Where(m =>
+            m.DisplayName.Contains(term, StringComparison.OrdinalIgnoreCase)
+            || m.ModelId.Contains(term, StringComparison.OrdinalIgnoreCase)
+            || m.Provider.Contains(term, StringComparison.OrdinalIgnoreCase)
+            || m.Badges.Any(b => b.Contains(term, StringComparison.OrdinalIgnoreCase))
+            || m.InputModalities.Any(mod => mod.Contains(term, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static string FormatProviderName(string provider) => provider switch
+    {
+        "anthropic" => "Anthropic",
+        "openai" => "OpenAI",
+        "openrouter" => "OpenRouter",
+        "ollama" => "Ollama · Local",
+        "github-copilot" => "GitHub Copilot",
+        "openai-compatible" => "OpenAI Compatible",
+        _ => provider,
+    };
+
+    private static string FormatContext(int tokens) =>
+        tokens >= 1_000_000 ? $"{tokens / 1_000_000}M"
+        : tokens >= 1_000 ? $"{tokens / 1_000}K"
+        : tokens.ToString();
+
+    public void Dispose()
+    {
+        Feed.Updated -= OnFeedUpdated;
+    }
+}

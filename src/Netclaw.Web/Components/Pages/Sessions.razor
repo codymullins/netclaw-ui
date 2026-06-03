@@ -1,0 +1,153 @@
+@page "/sessions"
+@rendermode RenderMode.InteractiveServer
+@implements IDisposable
+@inject DaemonClientService SessionsClient
+@inject TimeProvider Time
+
+<div class="nc-page-head">
+    <div>
+        <h1 class="nc-h1">Sessions</h1>
+        <p class="nc-sub">Recent agent sessions · auto-refreshes every 5s</p>
+    </div>
+    <div>
+        <button class="nc-btn" disabled="@_loading" @onclick="RefreshAsync">Refresh</button>
+    </div>
+</div>
+
+@if (_result is null)
+{
+    <section class="nc-card">
+        <div class="nc-card__body"><em>Loading…</em></div>
+    </section>
+}
+else
+{
+    switch (_result.State)
+    {
+        case DaemonApiResultState.Unreachable:
+            <div class="nc-banner nc-banner--bad">
+                <div>
+                    <div class="nc-banner__title">Daemon not running</div>
+                    <div class="nc-banner__detail">
+                        @(_result.ErrorDetail ?? "No response from the configured endpoint.")
+                        <a href="/daemon" style="margin-left:6px;">Start it from the Daemon page →</a>
+                    </div>
+                </div>
+            </div>
+            break;
+
+        case DaemonApiResultState.Unauthorized:
+            <div class="nc-banner nc-banner--warn">
+                <div>
+                    <div class="nc-banner__title">Daemon authentication required</div>
+                    <div class="nc-banner__detail">Pair this host with the daemon to obtain a device token.</div>
+                </div>
+            </div>
+            break;
+
+        case DaemonApiResultState.Ok when _result.Value is { } sessions:
+            @if (sessions.Count == 0)
+            {
+                <section class="nc-card">
+                    <div class="nc-card__body" style="text-align:center; padding:40px 24px;">
+                        <div style="font-size:32px; margin-bottom:12px; color:var(--nc-fg-muted);">💬</div>
+                        <div style="font-size:15px; font-weight:600; color:var(--nc-fg-base);">No sessions yet</div>
+                        <div style="font-size:13px; color:var(--nc-fg-muted); margin-top:6px; max-width:360px; margin-left:auto; margin-right:auto; line-height:1.6;">
+                            Sessions appear here once users start conversations with the agent through a connected channel.
+                        </div>
+                    </div>
+                </section>
+            }
+            else
+            {
+                <section class="nc-card">
+                    <header class="nc-card__head">
+                        <h2 class="nc-h2">Recent sessions</h2>
+                        <div class="nc-card__head-meta">@sessions.Count shown</div>
+                    </header>
+                    <div class="nc-card__body">
+                        <div class="nc-row-list">
+                            @foreach (var s in sessions)
+                            {
+                                var isActive = string.Equals(s.Status, "active", StringComparison.OrdinalIgnoreCase);
+                                var statusTone = isActive ? "good" : "neutral";
+                                var pillClass = isActive ? "nc-pill nc-pill--good" : "nc-pill nc-pill--neutral";
+                                <div class="nc-row" style="grid-template-columns: 1fr auto auto auto; align-items:center;">
+                                    <div>
+                                        <div class="nc-row__name nc-mono" style="font-size:12.5px;">@s.ThreadId</div>
+                                        @if (!string.IsNullOrWhiteSpace(s.Title))
+                                        {
+                                            <div class="nc-row__sub">@s.Title</div>
+                                        }
+                                        else
+                                        {
+                                            <div class="nc-row__sub" style="color:var(--nc-fg-dim);">@ChannelLabel(s.Channel)</div>
+                                        }
+                                    </div>
+                                    <div style="text-align:right; min-width:80px;">
+                                        <div style="font-size:12px; color:var(--nc-fg-muted);">@s.TurnCount turn@(s.TurnCount == 1 ? "" : "s")</div>
+                                        <div style="font-size:11px; color:var(--nc-fg-dim);">@ChannelLabel(s.Channel)</div>
+                                    </div>
+                                    <div style="min-width:70px; text-align:right; font-size:12px; color:var(--nc-fg-muted);">
+                                        @RelativeTime(s.LastActivity)
+                                    </div>
+                                    <span class="@pillClass">@s.Status</span>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </section>
+            }
+            break;
+    }
+}
+
+@code {
+    private DaemonApiResult<List<SessionCatalogEntryWire>>? _result;
+    private bool _loading;
+    private System.Threading.Timer? _timer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+        _timer = new System.Threading.Timer(_ => InvokeAsync(RefreshAsync), null,
+            TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+    }
+
+    private async Task RefreshAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+        _result = await SessionsClient.GetSessionsAsync();
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private string RelativeTime(long unixMs)
+    {
+        var now = Time.GetUtcNow();
+        var then = DateTimeOffset.FromUnixTimeMilliseconds(unixMs);
+        var age = now - then;
+
+        if (age.TotalSeconds < 60) return "just now";
+        if (age.TotalMinutes < 60) return $"{(int)age.TotalMinutes}m ago";
+        if (age.TotalHours < 24) return $"{(int)age.TotalHours}h ago";
+        return $"{(int)age.TotalDays}d ago";
+    }
+
+    private static string ChannelLabel(string channel) => channel switch
+    {
+        "slack" => "Slack",
+        "discord" => "Discord",
+        "mattermost" => "Mattermost",
+        "signalr" => "SignalR",
+        "headless" => "Headless",
+        "console" => "Console",
+        _ => channel,
+    };
+
+    public void Dispose()
+    {
+        _timer?.Dispose();
+    }
+}

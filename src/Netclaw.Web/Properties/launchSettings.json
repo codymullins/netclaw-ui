@@ -1,0 +1,14 @@
+{
+  "profiles": {
+    "Netclaw.Web": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": false,
+      "applicationUrl": "http://127.0.0.1:5198",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "NETCLAW_DAEMON_PATH": "../Netclaw.Daemon/bin/Debug/net10.0/netclawd"
+      }
+    }
+  }
+}

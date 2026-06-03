@@ -1,0 +1,53 @@
+@page "/configuration"
+@inject NetclawConfigReader Reader
+
+<div class="nc-page-head">
+    <div>
+        <h1 class="nc-h1">Configuration</h1>
+        <p class="nc-sub">File: <code class="nc-mono">@Reader.ConfigPath</code></p>
+    </div>
+</div>
+
+@{
+    var result = Reader.Read();
+}
+
+@switch (result.State)
+{
+    case NetclawConfigReadState.Missing:
+        <div class="nc-banner nc-banner--info">
+            <div>
+                <div class="nc-banner__title">No configuration file</div>
+                <div class="nc-banner__detail">
+                    Expected at <code class="nc-mono">@result.Path</code>. Run
+                    <code class="nc-mono">netclaw init</code> to create one.
+                </div>
+            </div>
+        </div>
+        break;
+
+    case NetclawConfigReadState.ParseError:
+        <div class="nc-banner nc-banner--bad">
+            <div>
+                <div class="nc-banner__title">Could not parse configuration file</div>
+                <div class="nc-banner__detail">@result.ErrorDetail</div>
+            </div>
+        </div>
+        break;
+
+    case NetclawConfigReadState.Ok:
+        <section class="nc-card">
+            <header class="nc-card__head">
+                <h2 class="nc-h2">netclaw.json</h2>
+                <span class="nc-card__head-meta">read-only</span>
+            </header>
+            <div class="nc-card__body" style="padding:0;">
+                <pre class="nc-codeblock"><code>@result.Content</code></pre>
+            </div>
+        </section>
+        <p style="color:var(--nc-fg-muted); font-size:12.5px; margin-top:10px;">
+            Read-only view. <code class="nc-mono">secrets.json</code> and
+            <code class="nc-mono">devices.json</code> are never read by this page.
+        </p>
+        break;
+}

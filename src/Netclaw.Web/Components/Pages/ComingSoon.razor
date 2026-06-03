@@ -1,0 +1,43 @@
+@* Placeholder host for sidebar destinations on the roadmap but not yet
+   implemented. One component, many @page directives, so the IA matches the
+   handoff without leaving dead links. *@
+@page "/logs"
+@page "/memory"
+@page "/connectors/slack"
+@page "/connectors/mattermost"
+@page "/connectors/webhooks"
+@inject NavigationManager Nav
+
+<div class="nc-page-head">
+    <div>
+        <h1 class="nc-h1">@Title</h1>
+        <p class="nc-sub">On the roadmap</p>
+    </div>
+</div>
+
+<section class="nc-card">
+    <div class="nc-card__body" style="display:flex; flex-direction:column; gap:10px;">
+        <p style="margin:0; color:var(--nc-fg-muted); font-size:14px; line-height:1.6;">
+            <strong style="color:var(--nc-fg);">@Title</strong> isn't available in this
+            build of Netclaw Web yet. The sidebar entry is here so the information
+            architecture matches the design handoff; the surface itself will land
+            in a follow-up change.
+        </p>
+        <p style="margin:0; color:var(--nc-fg-dim); font-size:13px;">
+            In the meantime, the <a class="nc-link" href="/status">Status</a> page
+            shows the live state of any related daemon subsystem.
+        </p>
+    </div>
+</section>
+
+@code {
+    private string Title => Nav.ToBaseRelativePath(Nav.Uri).TrimEnd('/').ToLowerInvariant() switch
+    {
+        "logs" => "Logs",
+        "memory" => "Memory",
+        "connectors/slack" => "Slack",
+        "connectors/mattermost" => "Mattermost",
+        "connectors/webhooks" => "Webhooks",
+        _ => "Coming soon",
+    };
+}

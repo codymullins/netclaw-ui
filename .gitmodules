@@ -1,0 +1,4 @@
+[submodule "netclaw"]
+	path = netclaw
+	url = git@github.com:codymullins/netclaw.git
+	branch = management-ui

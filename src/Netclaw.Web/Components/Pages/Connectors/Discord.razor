@@ -1,0 +1,43 @@
+@page "/connectors/discord"
+@rendermode RenderMode.InteractiveServer
+@inject NavigationManager Nav
+
+<div class="nc-page-head">
+    <div>
+        <h1 class="nc-h1">Discord</h1>
+        <p class="nc-sub">Connector overview &amp; configuration</p>
+    </div>
+</div>
+
+<nav class="nc-tabs" role="tablist" aria-label="Discord sections">
+    <button class="nc-tab @(IsActive("overview") ? "nc-tab--active" : string.Empty)"
+            role="tab" aria-selected="@(IsActive("overview") ? "true" : "false")"
+            @onclick="@(() => Switch("overview"))">Overview</button>
+    <button class="nc-tab @(IsActive("configuration") ? "nc-tab--active" : string.Empty)"
+            role="tab" aria-selected="@(IsActive("configuration") ? "true" : "false")"
+            @onclick="@(() => Switch("configuration"))">Configuration</button>
+</nav>
+
+<div role="tabpanel" style="margin-top:16px;">
+    @if (IsActive("configuration"))
+    {
+        <_DiscordConfigurationTab />
+    }
+    else
+    {
+        <_DiscordOverview />
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery] public string? Tab { get; set; }
+
+    private bool IsActive(string tab) =>
+        string.Equals(Tab ?? "overview", tab, StringComparison.OrdinalIgnoreCase);
+
+    private void Switch(string tab)
+    {
+        var target = Nav.GetUriWithQueryParameter("tab", tab);
+        Nav.NavigateTo(target, replace: true);
+    }
+}

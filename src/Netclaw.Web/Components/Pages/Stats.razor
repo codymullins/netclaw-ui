@@ -1,0 +1,240 @@
+@page "/stats"
+@rendermode RenderMode.InteractiveServer
+@inject DaemonClientService Client
+
+<div class="nc-page-head">
+    <div>
+        <h1 class="nc-h1">Stats</h1>
+        <p class="nc-sub">Usage metrics from the running daemon</p>
+    </div>
+    <div class="nc-seg" role="group" aria-label="Day range">
+        <button class="nc-seg__item @(_days == 7 ? "nc-seg__item--active" : string.Empty)"
+                @onclick="@(() => SetDays(7))">7d</button>
+        <button class="nc-seg__item @(_days == 30 ? "nc-seg__item--active" : string.Empty)"
+                @onclick="@(() => SetDays(30))">30d</button>
+        <button class="nc-seg__item @(_days == 90 ? "nc-seg__item--active" : string.Empty)"
+                @onclick="@(() => SetDays(90))">90d</button>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <section class="nc-card"><div class="nc-card__body"><em>Loading…</em></div></section>
+}
+else if (_statsResult?.State == DaemonApiResultState.Unauthorized)
+{
+    <div class="nc-banner nc-banner--warn">
+        <div>
+            <div class="nc-banner__title">Unauthorized</div>
+            <div class="nc-banner__detail">Pair this host with the daemon to obtain a device token.</div>
+        </div>
+    </div>
+}
+else if (_statsResult?.State == DaemonApiResultState.Unreachable)
+{
+    <div class="nc-banner nc-banner--bad">
+        <div>
+            <div class="nc-banner__title">Daemon unreachable</div>
+            <div class="nc-banner__detail">@(_statsResult.ErrorDetail ?? "Endpoint did not respond.")</div>
+        </div>
+    </div>
+}
+else if (_stats is not null)
+{
+    <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:12px; margin-bottom:16px;">
+        <section class="nc-card nc-card--kpi">
+            <div class="nc-kpi__label">Sessions</div>
+            <div class="nc-kpi__value nc-kpi__value--mono">@_stats.Sessions.TotalSessions.ToString("N0")</div>
+            <div class="nc-kpi__sub">@_stats.Sessions.ActiveSessions active</div>
+        </section>
+        <section class="nc-card nc-card--kpi">
+            <div class="nc-kpi__label">Turns</div>
+            <div class="nc-kpi__value nc-kpi__value--mono">@_stats.Sessions.TotalTurns.ToString("N0")</div>
+            <div class="nc-kpi__sub">process lifetime</div>
+        </section>
+        <section class="nc-card nc-card--kpi">
+            <div class="nc-kpi__label">Input tokens</div>
+            <div class="nc-kpi__value nc-kpi__value--mono">@FormatTokens(_stats.Tokens.InputTokensTotal)</div>
+            <div class="nc-kpi__sub">process lifetime</div>
+        </section>
+        <section class="nc-card nc-card--kpi">
+            <div class="nc-kpi__label">Output tokens</div>
+            <div class="nc-kpi__value nc-kpi__value--mono">@FormatTokens(_stats.Tokens.OutputTokensTotal)</div>
+            <div class="nc-kpi__sub">process lifetime</div>
+        </section>
+        <section class="nc-card nc-card--kpi">
+            <div class="nc-kpi__label">Skills available</div>
+            <div class="nc-kpi__value nc-kpi__value--mono">@_stats.Skills.TotalAvailable</div>
+            <div class="nc-kpi__sub">@_stats.Tokens.SkillsLoadedTotal.ToString("N0") loaded total</div>
+        </section>
+    </div>
+
+    <div style="display:grid; grid-template-columns: 1fr 2fr; gap:12px; margin-bottom:16px;">
+        <section class="nc-card">
+            <header class="nc-card__head"><h2 class="nc-h2">Memory</h2></header>
+            <div class="nc-card__body">
+                <div style="margin-bottom:8px;">
+                    <span class="nc-kpi__label">Status </span>
+                    <code>@_stats.Memory.Status</code>
+                </div>
+                @if (_stats.Memory.Status != "unavailable")
+                {
+                    <table class="nc-table nc-table--compact" style="width:100%;">
+                        <tbody>
+                            <tr><td>Anchors</td><td class="nc-mono-sm">@_stats.Memory.AnchorCount.ToString("N0")</td></tr>
+                            <tr><td>Documents</td><td class="nc-mono-sm">@_stats.Memory.DocumentCount.ToString("N0")</td></tr>
+                            <tr><td>Records</td><td class="nc-mono-sm">@_stats.Memory.RecordCount.ToString("N0")</td></tr>
+                            <tr><td>Edges</td><td class="nc-mono-sm">@_stats.Memory.EdgeCount.ToString("N0")</td></tr>
+                            <tr><td>Pending checkpoints</td><td class="nc-mono-sm">@_stats.Memory.PendingCheckpoints</td></tr>
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </section>
+
+        <section class="nc-card">
+            <header class="nc-card__head"><h2 class="nc-h2">Daily breakdown</h2></header>
+            <div class="nc-card__body" style="padding:0;">
+                @if (_stats.DailyBreakdown.Count == 0)
+                {
+                    <p style="padding:14px 16px; color:var(--nc-fg-muted);">No daily data for this range.</p>
+                }
+                else
+                {
+                    <table class="nc-table" style="width:100%;">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Sessions</th>
+                                <th>Turns</th>
+                                <th>In tokens</th>
+                                <th>Out tokens</th>
+                                <th>Skills loaded</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in _stats.DailyBreakdown)
+                            {
+                                <tr>
+                                    <td class="nc-mono-sm">@row.Date</td>
+                                    <td>@row.Sessions.ToString("N0")</td>
+                                    <td>@row.Turns.ToString("N0")</td>
+                                    <td class="nc-mono-sm">@FormatTokens(row.InputTokens)</td>
+                                    <td class="nc-mono-sm">@FormatTokens(row.OutputTokens)</td>
+                                    <td>@row.SkillsLoaded.ToString("N0")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </section>
+    </div>
+
+    <section class="nc-card">
+        <header class="nc-card__head"><h2 class="nc-h2">Top skills (@_days d)</h2></header>
+        <div class="nc-card__body" style="padding:0;">
+            @if (_skillsResult?.State == DaemonApiResultState.Unreachable)
+            {
+                <p style="padding:14px 16px; color:var(--nc-bad);">
+                    Could not load skill stats: @(_skillsResult.ErrorDetail ?? "Endpoint did not respond.")
+                </p>
+            }
+            else if (_topSkills.Count == 0)
+            {
+                <p style="padding:14px 16px; color:var(--nc-fg-muted);">No skill usage data for this range.</p>
+            }
+            else
+            {
+                <table class="nc-table" style="width:100%;">
+                    <thead>
+                        <tr>
+                            <th>Skill</th>
+                            <th>Total loads</th>
+                            <th>Methods</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var skill in _topSkills)
+                        {
+                            <tr>
+                                <td>@skill.SkillName</td>
+                                <td class="nc-mono-sm">@skill.TotalLoads.ToString("N0")</td>
+                                <td style="color:var(--nc-fg-muted); font-size:12px;">
+                                    @string.Join(", ", skill.Methods.Select(m => $"{m.Method}×{m.Count}"))
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    private int _days = 7;
+    private bool _loading = true;
+
+    private DaemonApiResult<DaemonStats.Response>? _statsResult;
+    private DaemonApiResult<SkillUsageStats.Response>? _skillsResult;
+
+    private DaemonStats.Response? _stats => _statsResult?.Value;
+
+    private List<SkillUsageStats.SkillCount> _topSkills = [];
+
+    protected override async Task OnInitializedAsync()
+        => await LoadAsync();
+
+    private async Task SetDays(int days)
+    {
+        _days = days;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        var statsTask = Client.GetStatsAsync(_days);
+        var skillsTask = Client.GetSkillUsageStatsAsync(_days);
+        await Task.WhenAll(statsTask, skillsTask);
+
+        _statsResult = statsTask.Result;
+        _skillsResult = skillsTask.Result;
+        _topSkills = BuildTopSkills(_skillsResult?.Value);
+        _loading = false;
+    }
+
+    private static List<SkillUsageStats.SkillCount> BuildTopSkills(SkillUsageStats.Response? response)
+    {
+        if (response is null) return [];
+
+        return response.Daily
+            .SelectMany(d => d.Skills)
+            .GroupBy(s => s.SkillName, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new SkillUsageStats.SkillCount
+            {
+                SkillName = g.Key,
+                TotalLoads = g.Sum(s => s.TotalLoads),
+                Methods = g.SelectMany(s => s.Methods)
+                    .GroupBy(m => m.Method, StringComparer.OrdinalIgnoreCase)
+                    .Select(mg => new SkillUsageStats.MethodCount
+                    {
+                        Method = mg.Key,
+                        Count = mg.Sum(m => m.Count)
+                    })
+                    .OrderByDescending(m => m.Count)
+                    .ToList()
+            })
+            .OrderByDescending(s => s.TotalLoads)
+            .Take(25)
+            .ToList();
+    }
+
+    private static string FormatTokens(long n) =>
+        n >= 1_000_000 ? $"{n / 1_000_000.0:F1}M"
+        : n >= 1_000 ? $"{n / 1_000.0:F1}k"
+        : n.ToString("N0");
+}
