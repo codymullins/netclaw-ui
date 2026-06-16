@@ -323,9 +323,8 @@
     /// <summary>Shared renderer for one tool call — used standalone and inside groups.</summary>
     private RenderFragment<ToolCallItem> ToolRow => tool =>
         @<div class="nc-toolcard @(tool.IsComplete ? "nc-toolcard--done" : "nc-toolcard--live")">
-            <button type="button" class="nc-toolcard__head" @onclick="() => tool.Expanded = !tool.Expanded">
+            <button type="button" class="nc-toolcard__head" aria-expanded="@tool.Expanded" @onclick="() => tool.Expanded = !tool.Expanded">
                 <span class="nc-toolcard__status">
-                    @if (tool.IsComplete)
                     {
                         <text>✓</text>
                     }
