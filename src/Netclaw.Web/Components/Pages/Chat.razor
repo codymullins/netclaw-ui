@@ -78,9 +78,8 @@
             {
                 var expanded = IsGroupExpanded(group);
                 <div class="nc-toolgroup @(group.Tools.Any(t => !t.IsComplete) ? "nc-toolgroup--live" : null)">
-                    <button type="button" class="nc-toolgroup__head" @onclick="() => ToggleGroup(group)">
+                    <button type="button" class="nc-toolgroup__head" aria-expanded="@expanded" @onclick="() => ToggleGroup(group)">
                         <span class="nc-toolcard__status">
-                            @if (group.Tools.Any(t => !t.IsComplete))
                             {
                                 <span class="nc-chat-spinner"></span>
                             }
