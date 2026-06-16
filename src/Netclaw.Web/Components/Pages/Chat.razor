@@ -1,0 +1,741 @@
+@* Session ids contain slashes (e.g. "signalr/0be47a16..."), so the id segment
+   must be a catch-all — a plain {SessionId?} would 404 on the redirect that
+   lands the created session's id in the URL. *@
+@page "/chat"
+@page "/chat/{*SessionId}"
+@* Prerender must stay off: OnInitialized opens a daemon session, and a
+   prerender pass would open (and orphan) a second one before the circuit starts. *@
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@implements IAsyncDisposable
+@inject DaemonTargetStore Targets
+@inject NavigationManager Nav
+@inject TimeProvider Time
+@inject IJSRuntime JS
+@using System.Text.Json
+@using Microsoft.JSInterop
+@using Netclaw.Web.Services.Chat
+
+<div class="nc-chat">
+    <div class="nc-chat__head">
+        <div>
+            <h1 class="nc-h1">@(_state.Title ?? "Chat")</h1>
+            <div class="nc-chat__meta">
+                @if (_client.SessionId is { } sid)
+                {
+                    <span class="nc-mono-sm">@sid</span>
+                }
+                @if (_state.UsageSummary is { } usage)
+                {
+                    <span class="nc-mono-sm" style="color:var(--nc-fg-dim);">@usage</span>
+                }
+                @if (_state.ContextUsedFraction is { } ctx)
+                {
+                    <span class="nc-ctxmeter" title="@($"Context window {ctx:P0} used")">
+                        <span class="nc-ctxmeter__track">
+                            <span class="nc-ctxmeter__fill @(ctx >= 0.8 ? "nc-ctxmeter__fill--hot" : null)"
+                                  style="width:@((Math.Clamp(ctx, 0, 1) * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></span>
+                        </span>
+                    </span>
+                }
+            </div>
+        </div>
+        <div class="nc-chat__status">
+            <span class="@StatusPillClass()">@StatusLabel()</span>
+            <button class="nc-btn" @onclick="NewSessionAsync" disabled="@(_state.IsGenerating)">New session</button>
+        </div>
+    </div>
+
+    @if (_connection.State == ChatConnectionState.Disconnected)
+    {
+        <div class="nc-banner nc-banner--bad" style="margin-bottom:12px;">
+            <div>
+                <div class="nc-banner__title">Not connected to the daemon</div>
+                <div class="nc-banner__detail">
+                    @(_connection.Detail ?? "The session hub is unreachable.")
+                    <a href="/daemon" style="margin-left:6px;">Daemon page →</a>
+                </div>
+            </div>
+            <button class="nc-btn" disabled="@_connecting" @onclick="RetryAsync">Retry</button>
+        </div>
+    }
+
+    <div class="nc-chat__scroll" @ref="_transcriptRef">
+        @if (_state.Items.Count == 0 && _connection.State == ChatConnectionState.Connected)
+        {
+            <div class="nc-chat__empty">
+                <div class="nc-chat__empty-mark">›_</div>
+                <div class="nc-chat__empty-title">Talk to your agent</div>
+                <div class="nc-chat__empty-sub">
+                    Messages here go straight to the daemon, like the <span class="nc-mono">netclaw chat</span> TUI.
+                    Reasoning, tool runs, and approvals all show up live.
+                </div>
+            </div>
+        }
+
+        @foreach (var segment in Segments())
+        {
+            if (segment is ToolGroupSegment group)
+            {
+                var expanded = IsGroupExpanded(group);
+                <div class="nc-toolgroup @(group.Tools.Any(t => !t.IsComplete) ? "nc-toolgroup--live" : null)">
+                    <button type="button" class="nc-toolgroup__head" aria-expanded="@expanded" @onclick="() => ToggleGroup(group)">
+                        <span class="nc-toolcard__status">
+                            {
+                                <span class="nc-chat-spinner"></span>
+                            }
+                            else
+                            {
+                                <text>✓</text>
+                            }
+                        </span>
+                        <span class="nc-toolgroup__count">@GroupSummary(group.Tools)</span>
+                        @if (!expanded)
+                        {
+                            <span class="nc-toolgroup__names">@GroupNames(group.Tools)</span>
+                        }
+                        <span class="nc-disclose @(expanded ? "nc-disclose--open" : null)">›</span>
+                    </button>
+                    @if (expanded)
+                    {
+                        <div class="nc-toolgroup__body">
+                            @foreach (var tool in group.Tools)
+                            {
+                                @ToolRow(tool)
+                            }
+                        </div>
+                    }
+                </div>
+                continue;
+            }
+
+            var item = ((SingleSegment)segment).Item;
+            switch (item)
+            {
+                case UserMessageItem user:
+                    <div class="nc-chat-msg nc-chat-msg--user @(user.IsHistoric ? "nc-chat-msg--historic" : null)">
+                        <div class="nc-chat-msg__bubble">@user.Text</div>
+                    </div>
+                    break;
+
+                case AssistantMessageItem assistant:
+                    <div class="nc-chat-msg nc-chat-msg--assistant @(assistant.IsHistoric ? "nc-chat-msg--historic" : null)">
+                        <div class="nc-chat-msg__bubble nc-chat-md">
+                            @MarkdownRenderer.Render(assistant.Text)
+                            @if (assistant.IsStreaming)
+                            {
+                                <span class="nc-chat-caret"></span>
+                            }
+                        </div>
+                    </div>
+                    break;
+
+                case ThinkingItem thinking:
+                    <div class="nc-think @(thinking.IsStreaming ? "nc-think--live" : null)">
+                        <button type="button" class="nc-think__head" @onclick="() => thinking.Expanded = !thinking.Expanded">
+                            <span class="nc-think__glyph">◈</span>
+                            <span class="nc-think__label @(thinking.IsStreaming ? "nc-shimmer" : null)">
+                                @(thinking.IsStreaming ? "Thinking" : $"Thought for {FormatElapsed(thinking.Duration ?? TimeSpan.Zero)}")
+                            </span>
+                            <span class="nc-disclose @(thinking.Expanded ? "nc-disclose--open" : null)">›</span>
+                        </button>
+                        @if (thinking.Expanded)
+                        {
+                            <div class="nc-think__body">@thinking.Text</div>
+                        }
+                    </div>
+                    break;
+
+                case ToolCallItem tool:
+                    @ToolRow(tool)
+                    break;
+
+                case SubAgentItem agent:
+                    <div class="nc-subagent @(agent.IsComplete ? (agent.Success == false ? "nc-subagent--failed" : "nc-subagent--done") : null)">
+                        <span class="nc-toolcard__status">
+                            @if (!agent.IsComplete)
+                            {
+                                <span class="nc-chat-spinner"></span>
+                            }
+                            else if (agent.Success == false)
+                            {
+                                <text>✗</text>
+                            }
+                            else
+                            {
+                                <text>✓</text>
+                            }
+                        </span>
+                        <span class="nc-subagent__kicker">subagent</span>
+                        <span class="nc-subagent__name nc-mono">@agent.AgentName</span>
+                        @if (agent.IsComplete)
+                        {
+                            <span class="nc-subagent__stats nc-mono-sm">
+                                @JoinStats(agent)
+                            </span>
+                        }
+                        else
+                        {
+                            <span class="nc-subagent__stats nc-mono-sm nc-shimmer">running</span>
+                        }
+                    </div>
+                    break;
+
+                case FileArtifactItem file:
+                    <div class="nc-artifact">
+                        <div class="nc-artifact__icon nc-mono">@FileBadge(file)</div>
+                        <div class="nc-artifact__info">
+                            <div class="nc-artifact__name">@file.FileName</div>
+                            <div class="nc-artifact__meta nc-mono-sm">
+                                @if (!string.IsNullOrEmpty(file.MimeType))
+                                {
+                                    <span>@file.MimeType</span>
+                                }
+                                @if (!string.IsNullOrEmpty(file.FilePath))
+                                {
+                                    <span class="nc-artifact__path">@file.FilePath</span>
+                                }
+                            </div>
+                        </div>
+                        @if (!string.IsNullOrEmpty(file.FilePath))
+                        {
+                            <button type="button" class="nc-btn nc-artifact__copy" data-nc-copy-text="@file.FilePath">Copy path</button>
+                        }
+                    </div>
+                    break;
+
+                case ErrorItem error:
+                    <div class="nc-errorcard">
+                        <div class="nc-errorcard__head">
+                            <span class="nc-errorcard__title">Turn failed</span>
+                            @if (!string.IsNullOrEmpty(error.Category))
+                            {
+                                <span class="nc-pill nc-pill--bad">@error.Category</span>
+                            }
+                        </div>
+                        <div class="nc-errorcard__message">@error.Message</div>
+                        @if (!string.IsNullOrEmpty(error.Detail))
+                        {
+                            <pre class="nc-errorcard__detail">@TruncateBlock(error.Detail)</pre>
+                        }
+                        @if (!string.IsNullOrEmpty(error.CorrelationId))
+                        {
+                            <div class="nc-errorcard__corr nc-mono-sm">correlation @error.CorrelationId</div>
+                        }
+                    </div>
+                    break;
+
+                case NoticeItem notice:
+                    <div class="nc-chat-notice nc-chat-notice--@notice.Kind.ToString().ToLowerInvariant()">
+                        <span>@NoticePrefix(notice.Kind)@notice.Text</span>
+                        @if (!string.IsNullOrEmpty(notice.Detail))
+                        {
+                            <span class="nc-mono-sm nc-chat-notice__detail">@notice.Detail</span>
+                        }
+                    </div>
+                    break;
+            }
+        }
+
+        @if (_state.IsGenerating && !HasOpenStream())
+        {
+            <div class="nc-chat-notice nc-chat-notice--session">
+                <span class="nc-chat-spinner"></span>
+                <span>Generating…</span>
+            </div>
+        }
+    </div>
+
+    @if (_state.CurrentApproval is { } approval)
+    {
+        <div class="nc-approval">
+            <div class="nc-approval__stripe"></div>
+            <div class="nc-approval__main">
+                <div class="nc-approval__head">
+                    <span class="nc-approval__kicker">Approval required</span>
+                    <span class="nc-approval__tool nc-mono">@approval.ToolName</span>
+                    @if (_state.PendingApprovalCount > 1)
+                    {
+                        <span class="nc-pill nc-pill--warn">@(_state.PendingApprovalCount - 1) more queued</span>
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(approval.DisplayText))
+                {
+                    <pre class="nc-approval__body">@approval.DisplayText</pre>
+                }
+                <div class="nc-approval__meta">
+                    @if (approval.Cwd is { } cwd)
+                    {
+                        <span class="nc-approval__chip nc-mono-sm" title="Working directory">@cwd</span>
+                    }
+                    @foreach (var pattern in approval.Patterns)
+                    {
+                        <span class="nc-approval__chip nc-approval__chip--pattern nc-mono-sm">@pattern</span>
+                    }
+                </div>
+                @if (approval.IsMessy || approval.HasThirdPartyAdoptedContext)
+                {
+                    <div class="nc-approval__warning">
+                        @if (approval.IsMessy)
+                        {
+                            <span>⚠ The daemon flagged this command as hard to pattern-match — review it closely.</span>
+                        }
+                        @if (approval.HasThirdPartyAdoptedContext)
+                        {
+                            <span>⚠ This request includes context adopted from a third party.</span>
+                        }
+                    </div>
+                }
+                <div class="nc-approval__options">
+                    @{ var firstAllowKey = approval.Options.FirstOrDefault(o => !IsDenyOption(o.Key))?.Key; }
+                    @foreach (var option in approval.Options)
+                    {
+                        <button class="nc-appbtn @(IsDenyOption(option.Key) ? "nc-appbtn--deny" : option.Key == firstAllowKey ? "nc-appbtn--primary" : null)"
+                                @onclick="() => RespondToApprovalAsync(option.Key)">
+                            @option.Label
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="nc-chat-composer">
+        <textarea class="nc-input nc-chat-composer__input"
+                  @ref="_composerRef"
+                  placeholder="@ComposerPlaceholder()"
+                  disabled="@(!ComposerEnabled())"
+                  rows="3"
+                  @bind="_draft" @bind:event="oninput"></textarea>
+        <button class="nc-btn nc-btn--accent nc-chat-composer__send"
+                @ref="_sendButtonRef"
+                disabled="@(!CanSend())"
+                @onclick="SendAsync">
+            Send
+        </button>
+    </div>
+    <div class="nc-chat-composer__hint">Enter to send · Shift+Enter for a new line</div>
+</div>
+
+@code {
+    [Parameter]
+    public string? SessionId { get; set; }
+
+    /// <summary>Shared renderer for one tool call — used standalone and inside groups.</summary>
+    private RenderFragment<ToolCallItem> ToolRow => tool =>
+        @<div class="nc-toolcard @(tool.IsComplete ? "nc-toolcard--done" : "nc-toolcard--live")">
+            <button type="button" class="nc-toolcard__head" aria-expanded="@tool.Expanded" @onclick="() => tool.Expanded = !tool.Expanded">
+                <span class="nc-toolcard__status">
+                    {
+                        <text>✓</text>
+                    }
+                    else
+                    {
+                        <span class="nc-chat-spinner"></span>
+                    }
+                </span>
+                <span class="nc-toolcard__name nc-mono">@tool.ToolName</span>
+                @if (SummarizeArgs(tool.ArgumentsJson) is { Length: > 0 } summary)
+                {
+                    <span class="nc-toolcard__summary nc-mono">@summary</span>
+                }
+                @if (tool.Duration is { } d)
+                {
+                    <span class="nc-toolcard__time nc-num">@FormatElapsed(d)</span>
+                }
+                <span class="nc-disclose @(tool.Expanded ? "nc-disclose--open" : null)">›</span>
+            </button>
+            @if (tool.Expanded)
+            {
+                <div class="nc-toolcard__body">
+                    @if (!string.IsNullOrEmpty(tool.ArgumentsJson))
+                    {
+                        <div class="nc-toolcard__section">
+                            <span class="nc-toolcard__section-label">input</span>
+                            <pre class="nc-toolcard__pre">@PrettyJson(tool.ArgumentsJson)</pre>
+                        </div>
+                    }
+                    @if (tool.IsComplete)
+                    {
+                        <div class="nc-toolcard__section">
+                            <span class="nc-toolcard__section-label">result</span>
+                            <pre class="nc-toolcard__pre">@TruncateBlock(tool.Result ?? "(empty)")</pre>
+                        </div>
+                    }
+                </div>
+            }
+        </div>;
+
+    private ChatSessionClient _client = null!;
+    private ChatTranscriptState _state = null!;
+    private ChatConnectionSnapshot _connection = new(ChatConnectionState.Disconnected);
+    private ElementReference _transcriptRef;
+    private ElementReference _composerRef;
+    private ElementReference _sendButtonRef;
+    private string _draft = string.Empty;
+    private string? _boundSessionParam;
+    private bool _connecting;
+    private bool _scrollPending;
+    private bool _forceScroll;
+    private bool _composerWired;
+    private bool _transcriptWired;
+
+    protected override async Task OnInitializedAsync()
+    {
+        CreateClientAndState();
+        await ConnectAsync(SessionId);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Same component instance handles /chat, /chat/{a}, /chat/{b}; only a
+        // genuinely different target session warrants a rebuild. The redirect
+        // we issue ourselves after creating a session is a no-op here.
+        if (SessionId == _boundSessionParam || SessionId == _client.SessionId)
+        {
+            _boundSessionParam = SessionId;
+            return;
+        }
+
+        await _client.DisposeAsync();
+        CreateClientAndState();
+        await ConnectAsync(SessionId);
+    }
+
+    private void CreateClientAndState()
+    {
+        _boundSessionParam = SessionId;
+        _state = new ChatTranscriptState(Time);
+        _client = new ChatSessionClient(Targets);
+        _client.OutputReceived += OnOutput;
+        _client.ConnectionChanged += OnConnectionChanged;
+        _connection = _client.Connection;
+    }
+
+    private async Task ConnectAsync(string? resumeSessionId)
+    {
+        _connecting = true;
+        try
+        {
+            var sessionId = await _client.StartSessionAsync(resumeSessionId);
+            // Land the session id in the URL so a refresh resumes this session.
+            if (SessionId != sessionId)
+                Nav.NavigateTo($"/chat/{sessionId}", replace: true);
+        }
+        catch
+        {
+            // The client already published a Disconnected snapshot with detail;
+            // the banner above renders it and offers a retry.
+        }
+        finally
+        {
+            _connecting = false;
+        }
+    }
+
+    private async Task RetryAsync() => await ConnectAsync(_client.SessionId);
+
+    private async Task NewSessionAsync()
+    {
+        await _client.DisposeAsync();
+        CreateClientAndState();
+        await ConnectAsync(null);
+    }
+
+    private void OnOutput(SessionOutputDto dto) => InvokeAsync(() =>
+    {
+        _state.Apply(dto);
+        _scrollPending = true;
+        StateHasChanged();
+    });
+
+    private void OnConnectionChanged(ChatConnectionSnapshot snapshot) => InvokeAsync(() =>
+    {
+        _connection = snapshot;
+        StateHasChanged();
+    });
+
+    private async Task SendAsync()
+    {
+        var text = _draft.Trim();
+        if (text.Length == 0 || !CanSend())
+            return;
+
+        _draft = string.Empty;
+        _state.AddUserMessage(text);
+        _scrollPending = true;
+        _forceScroll = true;
+
+        try
+        {
+            await _client.SendAsync(text);
+        }
+        catch (Exception ex)
+        {
+            _state.Apply(new SessionOutputDto
+            {
+                Type = SessionOutputTypes.Error,
+                SessionId = _client.SessionId ?? string.Empty,
+                ErrorMessage = $"Send failed: {ex.Message}",
+            });
+        }
+    }
+
+    private async Task RespondToApprovalAsync(string selectedKey)
+    {
+        if (_state.ResolveCurrentApproval(selectedKey) is not { } approval)
+            return;
+
+        _scrollPending = true;
+        try
+        {
+            await _client.RespondToInteractionAsync(approval.CallId, selectedKey);
+        }
+        catch (Exception ex)
+        {
+            _state.Apply(new SessionOutputDto
+            {
+                Type = SessionOutputTypes.Error,
+                SessionId = _client.SessionId ?? string.Empty,
+                ErrorMessage = $"Approval response failed: {ex.Message}",
+            });
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_composerWired)
+        {
+            _composerWired = true;
+            await JS.InvokeVoidAsync("ncChat.wireComposer", _composerRef, _sendButtonRef);
+        }
+
+        if (!_transcriptWired)
+        {
+            _transcriptWired = true;
+            await JS.InvokeVoidAsync("ncChat.wireTranscript", _transcriptRef);
+        }
+
+        if (_scrollPending)
+        {
+            _scrollPending = false;
+            var force = _forceScroll;
+            _forceScroll = false;
+            await JS.InvokeVoidAsync("ncChat.scrollToBottom", _transcriptRef, force);
+        }
+    }
+
+    private bool ComposerEnabled() =>
+        _connection.State == ChatConnectionState.Connected && _state.CurrentApproval is null;
+
+    private bool CanSend() => ComposerEnabled() && !_state.IsGenerating;
+
+    private string ComposerPlaceholder() => _connection.State switch
+    {
+        ChatConnectionState.Connected when _state.CurrentApproval is not null =>
+            "Respond to the approval prompt above to continue...",
+        ChatConnectionState.Connected => "Message the agent...",
+        ChatConnectionState.Connecting => "Connecting...",
+        ChatConnectionState.Reconnecting => "Reconnecting...",
+        _ => "Disconnected.",
+    };
+
+    private bool HasOpenStream() =>
+        _state.Items.Count > 0
+        && _state.Items[^1] is AssistantMessageItem { IsStreaming: true } or ThinkingItem { IsStreaming: true };
+
+    private string StatusLabel() => _connection.State switch
+    {
+        ChatConnectionState.Connected when _state.CurrentApproval is not null => "Approval required",
+        ChatConnectionState.Connected when _state.IsGenerating => "Generating",
+        ChatConnectionState.Connected => "Ready",
+        ChatConnectionState.Connecting => "Connecting",
+        ChatConnectionState.Reconnecting => "Reconnecting",
+        _ => "Disconnected",
+    };
+
+    private string StatusPillClass() => _connection.State switch
+    {
+        ChatConnectionState.Connected when _state.CurrentApproval is not null => "nc-pill nc-pill--warn",
+        ChatConnectionState.Connected when _state.IsGenerating => "nc-pill nc-pill--accent",
+        ChatConnectionState.Connected => "nc-pill nc-pill--good",
+        ChatConnectionState.Disconnected => "nc-pill nc-pill--bad",
+        _ => "nc-pill nc-pill--warn",
+    };
+
+    private static string NoticePrefix(NoticeKind kind) => kind switch
+    {
+        NoticeKind.Approval => "Approval · ",
+        _ => string.Empty,
+    };
+
+    private static bool IsDenyOption(string key) =>
+        key.Contains("deny", StringComparison.OrdinalIgnoreCase)
+        || key.Contains("reject", StringComparison.OrdinalIgnoreCase);
+
+    private static string Truncate(string text, int maxLength) =>
+        text.Length <= maxLength ? text : string.Concat(text.AsSpan(0, maxLength - 1), "…");
+
+    /// <summary>Caps huge payloads (tool results, error details) so one giant
+    /// blob can't swamp the circuit; the daemon log holds the full text.</summary>
+    private static string TruncateBlock(string text) =>
+        text.Length <= 6000
+            ? text
+            : string.Concat(text.AsSpan(0, 6000), $"{Environment.NewLine}… truncated ({text.Length:N0} chars total)");
+
+    /// <summary>One-line preview of a tool's arguments for the collapsed header:
+    /// the first primitive property as <c>name: value</c>, else raw JSON.</summary>
+    private static string SummarizeArgs(string? argumentsJson)
+    {
+        if (string.IsNullOrWhiteSpace(argumentsJson))
+            return string.Empty;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(argumentsJson);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var property in doc.RootElement.EnumerateObject())
+                {
+                    if (property.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+                        continue;
+                    return Truncate($"{property.Name}: {property.Value}", 80);
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Not JSON — fall through to the raw preview.
+        }
+
+        return Truncate(argumentsJson, 80);
+    }
+
+    private static string PrettyJson(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (JsonException)
+        {
+            return json;
+        }
+    }
+
+    private static string JoinStats(SubAgentItem agent)
+    {
+        var parts = new List<string>();
+        if (agent.ToolCount is { } tools)
+            parts.Add($"{tools} tool{(tools == 1 ? "" : "s")}");
+        if (agent.Duration is { } d)
+            parts.Add(FormatElapsed(d));
+        if (agent.FindingsCount is > 0 and var findings)
+            parts.Add($"{findings} finding{(findings == 1 ? "" : "s")}");
+        if (!string.IsNullOrEmpty(agent.MemoryDecision))
+            parts.Add($"memory: {agent.MemoryDecision}");
+        if (agent.Success == false)
+            parts.Add("failed");
+        return parts.Count > 0 ? string.Join(" · ", parts) : "done";
+    }
+
+    /// <summary>Short uppercase badge for the artifact tile — the file
+    /// extension when present, else a mime-derived tag.</summary>
+    private static string FileBadge(FileArtifactItem file)
+    {
+        var ext = Path.GetExtension(file.FileName);
+        if (!string.IsNullOrEmpty(ext) && ext.Length <= 6)
+            return ext.TrimStart('.').ToUpperInvariant();
+
+        var mime = file.MimeType;
+        if (string.IsNullOrEmpty(mime))
+            return "FILE";
+        var slash = mime.IndexOf('/');
+        var sub = slash >= 0 ? mime[(slash + 1)..] : mime;
+        return Truncate(sub.ToUpperInvariant(), 6);
+    }
+
+    private static string FormatElapsed(TimeSpan elapsed) =>
+        elapsed.TotalSeconds < 60
+            ? $"{elapsed.TotalSeconds:F1}s"
+            : $"{(int)elapsed.TotalMinutes}m {elapsed.Seconds}s";
+
+    // ── Tool-run grouping ────────────────────────────────────────────────
+    // Consecutive tool calls fold into one group card. Grouping is purely a
+    // render-time view over the transcript: the state machine stays flat.
+
+    private abstract record TranscriptSegment;
+
+    private sealed record SingleSegment(ChatItem Item) : TranscriptSegment;
+
+    private sealed record ToolGroupSegment(IReadOnlyList<ToolCallItem> Tools, string Key) : TranscriptSegment;
+
+    /// <summary>
+    /// Operator overrides for group disclosure, keyed by the group's stable key.
+    /// Absent ⇒ automatic: expanded while any call runs, folded when done.
+    /// </summary>
+    private readonly Dictionary<string, bool> _groupOverrides = [];
+
+    private IEnumerable<TranscriptSegment> Segments()
+    {
+        var items = _state.Items;
+        for (var i = 0; i < items.Count; i++)
+        {
+            if (items[i] is not ToolCallItem first)
+            {
+                yield return new SingleSegment(items[i]);
+                continue;
+            }
+
+            // The transcript is append-only, so a group's start index — and
+            // therefore its key — is stable as later calls join the run.
+            var key = $"{i}:{first.CallId}";
+            var run = new List<ToolCallItem> { first };
+            while (i + 1 < items.Count && items[i + 1] is ToolCallItem next)
+            {
+                run.Add(next);
+                i++;
+            }
+
+            if (run.Count >= 2)
+                yield return new ToolGroupSegment(run, key);
+            else
+                yield return new SingleSegment(first);
+        }
+    }
+
+    private bool IsGroupExpanded(ToolGroupSegment group) =>
+        _groupOverrides.TryGetValue(group.Key, out var expanded)
+            ? expanded
+            : group.Tools.Any(t => !t.IsComplete);
+
+    private void ToggleGroup(ToolGroupSegment group) =>
+        _groupOverrides[group.Key] = !IsGroupExpanded(group);
+
+    private static string GroupSummary(IReadOnlyList<ToolCallItem> tools)
+    {
+        var running = tools.Count(t => !t.IsComplete);
+        if (running > 0)
+            return $"{tools.Count} tool calls · {running} running";
+
+        var total = TimeSpan.FromMilliseconds(
+            tools.Sum(t => (t.Duration ?? TimeSpan.Zero).TotalMilliseconds));
+        return $"{tools.Count} tool calls · {FormatElapsed(total)}";
+    }
+
+    /// <summary>Collapsed-header preview: distinct tool names, first three.</summary>
+    private static string GroupNames(IReadOnlyList<ToolCallItem> tools)
+    {
+        var names = tools.Select(t => t.ToolName).Distinct().ToList();
+        return names.Count <= 3
+            ? string.Join(", ", names)
+            : $"{string.Join(", ", names.Take(3))} +{names.Count - 3}";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _client.OutputReceived -= OnOutput;
+        _client.ConnectionChanged -= OnConnectionChanged;
+        await _client.DisposeAsync();
+    }
+}

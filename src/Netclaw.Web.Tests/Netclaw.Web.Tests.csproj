@@ -12,11 +12,18 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio" />
+    <!-- Direct reference only to lift the vulnerable transitive 1.9.0 coming
+         via Netclaw.Actors to the patched version pinned centrally. -->
+    <PackageReference Include="OpenTelemetry.Api" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../Netclaw.Web/Netclaw.Web.csproj" />
     <ProjectReference Include="../../netclaw/src/Netclaw.Configuration/Netclaw.Configuration.csproj" />
+    <!-- Tests only: lets SessionOutputDtoMirrorTests compare the app's mirrored
+         wire DTOs against the daemon's originals. The app itself must NOT
+         reference Netclaw.Actors — it would pull the whole agent runtime. -->
+    <ProjectReference Include="../../netclaw/src/Netclaw.Actors/Netclaw.Actors.csproj" />
   </ItemGroup>
 
 </Project>
