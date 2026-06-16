@@ -439,7 +439,6 @@
     private async Task NewSessionAsync()
     {
         await _client.DisposeAsync();
-        SessionId = null;
         CreateClientAndState();
         await ConnectAsync(null);
     }
